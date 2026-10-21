@@ -43,6 +43,9 @@ class EmuActivity : Activity(), SurfaceHolder.Callback {
     private lateinit var info: TextView
     private lateinit var keys: KeyCatcher
     private var pad: TouchPad? = null
+    private var kb: AmigaKeyboard? = null
+    /** Lecteur (0 = DF0:, 1 = DF1:) du prochain document choisi */
+    private var diskDrive = 0
     private val ui = Handler(Looper.getMainLooper())
     private var running = false
     private var paused = false
@@ -59,7 +62,8 @@ class EmuActivity : Activity(), SurfaceHolder.Callback {
             // Image en 4:3 centrée, ou étirée sur tout l'écran (« Pleine largeur »)
             override fun onLayout(changed: Boolean, l: Int, t: Int, r: Int, b: Int) {
                 super.onLayout(changed, l, t, r, b)
-                val w = r - l; val h = b - t
+                // Clavier Amiga affiché : l'image prend la place restante au-dessus
+                val w = r - l; val h = b - t - (kb?.layoutParams?.height ?: 0)
                 var sw = w; var sh = h
                 if (!s.fill) { if (w * 3 > h * 4) sw = h * 4 / 3 else sh = w * 3 / 4 }
                 val x = (w - sw) / 2; val y = (h - sh) / 2
@@ -80,12 +84,21 @@ class EmuActivity : Activity(), SurfaceHolder.Callback {
         }
         root.addView(info, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.TOP or Gravity.START))
 
-        val menuBtn = TextView(this).apply {
-            text = "☰"; textSize = 22f; setTextColor(Color.WHITE); alpha = 0.55f
-            setPadding(dp(14), dp(6), dp(14), dp(6))
-            setOnClickListener { menu(this) }
+        // Barre d'accès rapide : clavier Amiga, sauvegarde et reprise rapides, menu
+        fun barButton(t: String, f: (View) -> Unit) = TextView(this).apply {
+            text = t; textSize = 22f; setTextColor(Color.WHITE); alpha = 0.6f
+            setPadding(dp(12), dp(6), dp(12), dp(6))
+            setOnClickListener { f(it) }
         }
-        root.addView(menuBtn, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.TOP or Gravity.END))
+        val menuBtn = barButton("☰") { menu(it) }
+        val bar = android.widget.LinearLayout(this).apply {
+            orientation = android.widget.LinearLayout.HORIZONTAL
+            addView(barButton("⌨") { toggleKeyboard() })
+            addView(barButton("⤓") { saveSlot(0) })
+            addView(barButton("⤒") { loadSlot(0) })
+            addView(menuBtn)
+        }
+        root.addView(bar, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.TOP or Gravity.END))
         root.tag = menuBtn
 
         root.setOnTouchListener(mouse)
@@ -103,12 +116,14 @@ class EmuActivity : Activity(), SurfaceHolder.Callback {
         Native.log("amiga1200-android ${BuildConfig.VERSION_NAME}, Android ${Build.VERSION.RELEASE}, ${Build.MANUFACTURER} ${Build.MODEL}")
         val df0 = Disks.link(this, s.df0, s.df0Name)
         if (s.df0.isNotEmpty() && df0 == null) toast("Disquette ${s.df0Name} : accès refusé, choisissez-la à nouveau")
+        val df1 = Disks.link(this, s.df1, "df1-${s.df1Name}")
+        if (s.df1.isNotEmpty() && df1 == null) toast("Disquette ${s.df1Name} : accès refusé, choisissez-la à nouveau")
         val hds = s.hds.mapIndexedNotNull { i, h ->
             // Nom précédé du numéro : deux disques de même nom venant de dossiers différents restent distincts
             Disks.link(this, h.uri, "dh$i-${h.name}").also { if (it == null) toast("Disque dur ${h.name} : accès refusé, choisissez-le à nouveau") }
         }
         val shared = if (hds.isNotEmpty() && s.shared) Config.sharedDir(this) else null
-        val cfg = Config.write(this, s, df0, hds, shared)
+        val cfg = Config.write(this, s, df0, df1, hds, shared)
         Native.setDirs(Config.sysDir(this).path, Config.saveDir(this).path)
         // Options du cœur : celles de la version web (cadrage automatique, pas de barre d'état, manette 0 au port joystick)
         Native.setOption("amiberry_crop_overscan", "enabled")
@@ -191,11 +206,12 @@ class EmuActivity : Activity(), SurfaceHolder.Callback {
         val m = PopupMenu(this, anchor)
         m.menu.add(0, 1, 0, if (paused) "Reprendre" else "Pause")
         m.menu.add(0, 2, 0, if (turbo) "Vitesse normale" else "Turbo (mesure de vitesse)")
-        m.menu.add(0, 3, 0, "Clavier")
+        m.menu.add(0, 3, 0, if (kb == null) "Clavier Amiga" else "Masquer le clavier Amiga")
+        m.menu.add(0, 13, 0, "Clavier du téléphone")
+        m.menu.add(0, 14, 0, if (s.azerty) "Touches en QWERTY" else "Touches en AZERTY")
         m.menu.add(0, 4, 0, if (s.touchPad) "Écran tactile : souris" else "Écran tactile : manette")
-        m.menu.add(0, 5, 0, "Changer de disquette DF0:")
-        m.menu.add(0, 6, 0, "Sauvegarder l'état")
-        m.menu.add(0, 7, 0, "Reprendre l'état sauvegardé")
+        m.menu.add(0, 5, 0, "Disquettes DF0: et DF1:")
+        m.menu.add(0, 6, 0, "Sauvegardes d'état…")
         m.menu.add(0, 8, 0, if (s.fill) "Image en 4:3" else "Pleine largeur")
         m.menu.add(0, 9, 0, if (s.showSpeed) "Masquer la vitesse" else "Afficher la vitesse")
         m.menu.add(0, 10, 0, "Réinitialiser l'Amiga")
@@ -205,11 +221,12 @@ class EmuActivity : Activity(), SurfaceHolder.Callback {
             when (it.itemId) {
                 1 -> { paused = !paused; Native.pause(paused) }
                 2 -> { turbo = !turbo; Native.warp(if (turbo) 8 else 1) }
-                3 -> keys.show()
+                3 -> toggleKeyboard()
+                13 -> keys.show()
+                14 -> { s.azerty = !s.azerty; kb?.invalidate() }
                 4 -> { s.touchPad = !s.touchPad; setTouchPad(s.touchPad) }
-                5 -> pickDisk()
-                6 -> toast(if (Native.saveState(statePath())) "État sauvegardé" else "Sauvegarde impossible")
-                7 -> toast(if (File(statePath()).exists() && Native.loadState(statePath())) "État repris" else "Aucun état à reprendre")
+                5 -> disks()
+                6 -> states()
                 8 -> { s.fill = !s.fill; root.requestLayout() }
                 9 -> { s.showSpeed = !s.showSpeed }
                 10 -> Native.reset()
@@ -243,7 +260,61 @@ class EmuActivity : Activity(), SurfaceHolder.Callback {
             .show()
     }
 
-    private fun statePath() = File(Config.saveDir(this), "etat-${s.model}.uss").path
+    // ---------- clavier Amiga ----------
+    private fun kbHeight(): Int {
+        val m = resources.displayMetrics
+        return if (m.widthPixels > m.heightPixels) (m.heightPixels * 0.46f).toInt() else (m.widthPixels * 0.62f).toInt()
+    }
+
+    private fun toggleKeyboard() {
+        kb?.let { it.releaseAll(); root.removeView(it); kb = null; root.requestLayout(); return }
+        kb = AmigaKeyboard(this) { s.azerty }.also {
+            root.addView(it, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, kbHeight(), Gravity.BOTTOM))
+        }
+        root.requestLayout()
+    }
+
+    // ---------- sauvegardes d'état : quatre emplacements par machine ----------
+    private fun statePath(slot: Int) = File(Config.saveDir(this), "etat-${s.model}-${slot + 1}.uss")
+
+    private fun saveSlot(slot: Int) = toast(if (Native.saveState(statePath(slot).path)) "État ${slot + 1} sauvegardé" else "Sauvegarde impossible")
+    private fun loadSlot(slot: Int) {
+        val f = statePath(slot)
+        toast(if (f.exists() && Native.loadState(f.path)) "État ${slot + 1} repris" else "Aucun état ${slot + 1} à reprendre")
+    }
+
+    private fun states() {
+        val fmt = java.text.SimpleDateFormat("dd/MM HH:mm", Locale.FRANCE)
+        val labels = (0 until 4).map { i ->
+            val f = statePath(i)
+            "Emplacement ${i + 1} : " + if (f.exists()) fmt.format(java.util.Date(f.lastModified())) else "vide"
+        }.toTypedArray()
+        var chosen = 0
+        android.app.AlertDialog.Builder(this)
+            .setTitle("Sauvegardes d'état (⤓ ⤒ : emplacement 1)")
+            .setSingleChoiceItems(labels, 0) { _, w -> chosen = w }
+            .setPositiveButton("Sauvegarder") { _, _ -> saveSlot(chosen) }
+            .setNeutralButton("Reprendre") { _, _ -> loadSlot(chosen) }
+            .setNegativeButton("Fermer", null)
+            .show()
+    }
+
+    // ---------- disquettes ----------
+    private fun disks() {
+        val names = arrayOf("DF0: " + s.df0Name.ifEmpty { "vide" }, "DF1: " + s.df1Name.ifEmpty { "vide" })
+        var chosen = 0
+        android.app.AlertDialog.Builder(this)
+            .setTitle("Disquettes")
+            .setSingleChoiceItems(names, 0) { _, w -> chosen = w }
+            .setPositiveButton("Insérer…") { _, _ -> diskDrive = chosen; pickDisk() }
+            .setNeutralButton("Éjecter") { _, _ ->
+                Native.insertDisk(chosen, "")
+                if (chosen == 0) { s.df0 = ""; s.df0Name = "" } else { s.df1 = ""; s.df1Name = "" }
+                toast("DF$chosen: éjectée")
+            }
+            .setNegativeButton("Fermer", null)
+            .show()
+    }
 
     private fun pickDisk() {
         startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
@@ -260,11 +331,12 @@ class EmuActivity : Activity(), SurfaceHolder.Callback {
         try { contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION) }
         catch (_: Exception) { try { contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION) } catch (_: Exception) {} }
         val name = Disks.displayName(this, uri)
-        val path = Disks.link(this, uri.toString(), name)
+        val d = diskDrive
+        val path = Disks.link(this, uri.toString(), if (d == 0) name else "df1-$name")
         if (path == null) { toast("Lecture de $name impossible"); return }
-        s.df0 = uri.toString(); s.df0Name = name
-        Native.insertDisk(0, path)
-        toast("DF0: $name")
+        if (d == 0) { s.df0 = uri.toString(); s.df0Name = name } else { s.df1 = uri.toString(); s.df1Name = name }
+        Native.insertDisk(d, path)
+        toast("DF$d: $name")
     }
 
     private fun quit() {
@@ -330,7 +402,8 @@ class EmuActivity : Activity(), SurfaceHolder.Callback {
     // ---------- clavier et manettes ----------
     override fun dispatchKeyEvent(e: KeyEvent): Boolean {
         val down = e.action == KeyEvent.ACTION_DOWN
-        if (e.keyCode == KeyEvent.KEYCODE_BACK) {
+        // Retour, ou F12 comme dans la version web : le menu
+        if (e.keyCode == KeyEvent.KEYCODE_BACK || e.keyCode == KeyEvent.KEYCODE_F12) {
             if (!down) menu(root.tag as View)
             return true
         }

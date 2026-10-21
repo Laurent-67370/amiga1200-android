@@ -31,8 +31,13 @@ les réglages.
 - **Écran tactile** : il fait office de souris. Glisser déplace le pointeur et toucher fait un clic gauche.
   Toucher à deux doigts fait un clic droit, et un appui long suivi d'un glissement déplace une fenêtre. Le menu
   propose aussi une **manette tactile** (joystick à gauche, deux boutons à droite).
-- **Clavier et manettes** Bluetooth ou USB, plus le clavier virtuel du téléphone (menu → Clavier).
-- **Sauvegarde d'état**, pause, réinitialisation, image en 4:3 ou sur toute la largeur.
+- **Clavier Amiga à l'écran** (bouton ⌨) : Esc, F1 à F10, Del, Help, touches Amiga, Ctrl, Alt, Maj
+  (verrouillables), flèches et pavé numérique, libellés QWERTY ou AZERTY. Une touche tenue reste enfoncée.
+- **Clavier et manettes** Bluetooth ou USB, comme la version web : Inser = Help, Page préc./suiv. = touches Amiga,
+  F12 = menu. Le clavier du téléphone reste disponible (menu).
+- **Barre rapide** : ⌨ clavier, ⤓ sauvegarde et ⤒ reprise rapides, ☰ menu. **Quatre emplacements** de sauvegarde
+  d'état par machine, et **deux lecteurs de disquettes** (DF0:, DF1:).
+- Pause, réinitialisation, image en 4:3 ou sur toute la largeur.
 - **Mesure de vitesse** : le coin de l'écran affiche les images par seconde, le pourcentage du temps réel et
   le temps de calcul d'une image. Le **Turbo** (menu) fait tourner l'Amiga sans frein : comparez les images par
   seconde avec et sans JIT.
