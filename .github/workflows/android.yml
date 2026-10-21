@@ -31,6 +31,7 @@ jobs:
           restore-keys: amiberry-android-${{ hashFiles('native/build-core.sh', 'native/patches/*.patch') }}-
 
       - name: Cœur Amiberry ARM64 avec JIT (NDK)
+        id: core
         run: ANDROID_NDK_ROOT="$ANDROID_NDK_LATEST_HOME" native/build-core.sh
 
       - uses: gradle/actions/setup-gradle@v4
@@ -49,7 +50,7 @@ jobs:
           path: amiga1200-android.apk
 
       - name: Journal de compilation du cœur
-        if: failure()
+        if: failure() && steps.core.outcome == 'failure'
         run: tail -200 native/out/make.log || true
 
       # Version de test téléchargeable directement depuis le téléphone (page Releases du dépôt)

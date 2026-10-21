@@ -31,7 +31,7 @@ object Keymap {
 
     /** Caractère tapé sur un clavier virtuel → touche (et Maj) du clavier QWERTY de l'Amiga */
     private const val SHIFTED = "~!@#$%^&*()_+{}|:\"<>?"
-    private const val PLAIN = "`1234567890-=[]\;',./"
+    private const val PLAIN = "`1234567890-=[]\\;',./"
     fun forChar(c: Char): Pair<Int, Boolean>? = when {
         c in 'a'..'z' -> Pair(c.code, false)
         c in 'A'..'Z' -> Pair(c.lowercaseChar().code, true)
