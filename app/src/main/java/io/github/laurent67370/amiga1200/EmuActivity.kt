@@ -44,6 +44,11 @@ class EmuActivity : Activity(), SurfaceHolder.Callback {
     private lateinit var keys: KeyCatcher
     private var pad: TouchPad? = null
     private var kb: AmigaKeyboard? = null
+    private lateinit var bar: android.widget.LinearLayout
+    private lateinit var modeBtn: TextView
+    private lateinit var pauseBtn: TextView
+    /** Barre rapide estompée après quelques secondes sans toucher l'écran */
+    private val dimBar = Runnable { bar.animate().alpha(0.3f).setDuration(400).start() }
     /** Lecteur (0 = DF0:, 1 = DF1:) du prochain document choisi */
     private var diskDrive = 0
     private val ui = Handler(Looper.getMainLooper())
@@ -84,22 +89,28 @@ class EmuActivity : Activity(), SurfaceHolder.Callback {
         }
         root.addView(info, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.TOP or Gravity.START))
 
-        // Barre d'accès rapide : clavier Amiga, sauvegarde et reprise rapides, menu
+        // Barre d'accès rapide : clavier Amiga, souris ou manette, pause, sauvegarde et reprise rapides, menu
         fun barButton(t: String, f: (View) -> Unit) = TextView(this).apply {
-            text = t; textSize = 22f; setTextColor(Color.WHITE); alpha = 0.6f
-            setPadding(dp(12), dp(6), dp(12), dp(6))
+            text = t; textSize = 22f; setTextColor(Color.WHITE); setShadowLayer(4f, 0f, 0f, Color.BLACK)
+            setPadding(dp(11), dp(6), dp(11), dp(6))
             setOnClickListener { f(it) }
         }
         val menuBtn = barButton("☰") { menu(it) }
-        val bar = android.widget.LinearLayout(this).apply {
+        modeBtn = barButton(if (s.touchPad) "🕹" else "🖱") { toggleTouchMode() }
+        pauseBtn = barButton("⏸") { setPaused(!paused) }
+        bar = android.widget.LinearLayout(this).apply {
             orientation = android.widget.LinearLayout.HORIZONTAL
+            background = android.graphics.drawable.GradientDrawable().apply { cornerRadius = dp(18).toFloat(); setColor(Color.argb(110, 0, 0, 0)) }
             addView(barButton("⌨") { toggleKeyboard() })
+            addView(modeBtn)
+            addView(pauseBtn)
             addView(barButton("⤓") { saveSlot(0) })
             addView(barButton("⤒") { loadSlot(0) })
             addView(menuBtn)
         }
         root.addView(bar, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.TOP or Gravity.END))
         root.tag = menuBtn
+        ui.postDelayed(dimBar, 5000)
 
         root.setOnTouchListener(mouse)
         setTouchPad(s.touchPad)
@@ -204,38 +215,91 @@ class EmuActivity : Activity(), SurfaceHolder.Callback {
     // ---------- menu ----------
     private fun menu(anchor: View) {
         val m = PopupMenu(this, anchor)
-        m.menu.add(0, 1, 0, if (paused) "Reprendre" else "Pause")
-        m.menu.add(0, 2, 0, if (turbo) "Vitesse normale" else "Turbo (mesure de vitesse)")
-        m.menu.add(0, 3, 0, if (kb == null) "Clavier Amiga" else "Masquer le clavier Amiga")
-        m.menu.add(0, 13, 0, "Clavier du téléphone")
-        m.menu.add(0, 14, 0, if (s.azerty) "Touches en QWERTY" else "Touches en AZERTY")
-        m.menu.add(0, 4, 0, if (s.touchPad) "Écran tactile : souris" else "Écran tactile : manette")
-        m.menu.add(0, 5, 0, "Disquettes DF0: et DF1:")
-        m.menu.add(0, 6, 0, "Sauvegardes d'état…")
-        m.menu.add(0, 8, 0, if (s.fill) "Image en 4:3" else "Pleine largeur")
-        m.menu.add(0, 9, 0, if (s.showSpeed) "Masquer la vitesse" else "Afficher la vitesse")
-        m.menu.add(0, 10, 0, "Réinitialiser l'Amiga (redémarrage)")
-        m.menu.add(0, 12, 0, "Journal (diagnostic)")
-        m.menu.add(0, 11, 0, "Éteindre")
+        val mm = m.menu
+        mm.add(0, 1, 0, if (paused) "▶  Reprendre" else "⏸  Pause")
+        mm.add(0, 5, 0, "💾  Disquettes DF0: / DF1:")
+        mm.add(0, 6, 0, "📁  Sauvegardes d'état")
+        mm.add(0, 4, 0, if (s.touchPad) "🖱  Passer en souris tactile" else "🕹  Passer en manette tactile")
+        mm.addSubMenu(0, 100, 0, "⌨  Clavier").apply {
+            add(0, 3, 0, if (kb == null) "Afficher le clavier Amiga" else "Masquer le clavier Amiga")
+            add(0, 14, 0, if (s.azerty) "Lettres en QWERTY" else "Lettres en AZERTY")
+            add(0, 13, 0, "Clavier du téléphone")
+        }
+        mm.addSubMenu(0, 101, 0, "🖥  Écran").apply {
+            add(0, 8, 0, if (s.fill) "Image en 4:3" else "Image sur toute la largeur")
+            add(0, 9, 0, if (s.showSpeed) "Masquer la vitesse" else "Afficher la vitesse")
+        }
+        mm.addSubMenu(0, 102, 0, "🔧  Avancé").apply {
+            add(0, 2, 0, if (turbo) "Vitesse normale" else "Turbo (mesure de vitesse)")
+            add(0, 12, 0, "Journal (diagnostic)")
+            add(0, 15, 0, "Aide")
+        }
+        mm.add(0, 10, 0, "↺  Réinitialiser l'Amiga")
+        mm.add(0, 11, 0, "⏻  Éteindre")
         m.setOnMenuItemClickListener {
             when (it.itemId) {
-                1 -> { paused = !paused; Native.pause(paused) }
-                2 -> { turbo = !turbo; Native.warp(if (turbo) 8 else 1) }
+                1 -> setPaused(!paused)
+                2 -> { turbo = !turbo; Native.warp(if (turbo) 8 else 1); toastShort(if (turbo) "Turbo" else "Vitesse normale") }
                 3 -> toggleKeyboard()
                 13 -> keys.show()
                 14 -> { s.azerty = !s.azerty; kb?.invalidate() }
-                4 -> { s.touchPad = !s.touchPad; setTouchPad(s.touchPad) }
+                4 -> toggleTouchMode()
                 5 -> disks()
                 6 -> states()
                 8 -> { s.fill = !s.fill; root.requestLayout() }
                 9 -> { s.showSpeed = !s.showSpeed }
-                10 -> restart()
-                11 -> quit()
+                10 -> confirm("Réinitialiser l'Amiga ?", "L'Amiga redémarre à froid avec les mêmes disques. Ce qui n'est pas enregistré dans l'Amiga est perdu.") { restart() }
+                11 -> confirm("Éteindre l'Amiga ?", "Ce qui n'est pas enregistré dans l'Amiga est perdu (pensez à ⤓ pour une sauvegarde d'état).") { quit() }
                 12 -> journal()
+                15 -> help()
             }
             true
         }
         m.show()
+    }
+
+    private fun setPaused(p: Boolean) {
+        paused = p
+        Native.pause(p)
+        pauseBtn.text = if (p) "▶" else "⏸"
+    }
+
+    private fun toggleTouchMode() {
+        s.touchPad = !s.touchPad
+        setTouchPad(s.touchPad)
+        modeBtn.text = if (s.touchPad) "🕹" else "🖱"
+        toastShort(if (s.touchPad) "Manette tactile : joystick à gauche, tir à droite" else "Souris tactile : glisser, toucher pour cliquer")
+    }
+
+    private fun confirm(title: String, msg: String, ok: () -> Unit) {
+        android.app.AlertDialog.Builder(this).setTitle(title).setMessage(msg)
+            .setPositiveButton("Oui") { _, _ -> ok() }.setNegativeButton("Annuler", null).show()
+    }
+
+    private fun help() {
+        android.app.AlertDialog.Builder(this).setTitle("Commandes")
+            .setMessage("""
+                ⌨  clavier Amiga (F1-F10, Help, Del, touches Amiga, flèches). Ctrl, Maj, Alt et Amiga : un toucher pour la touche suivante, deux pour les bloquer.
+                🖱 / 🕹  souris tactile ou manette tactile
+                ⏸  pause
+                ⤓ / ⤒  sauvegarde et reprise rapides (emplacement 1)
+                ☰  menu complet (ou bouton Retour, ou F12)
+
+                Souris tactile : glisser pour déplacer le pointeur, toucher pour cliquer, toucher à deux doigts pour le clic droit, appui long puis glisser pour déplacer une fenêtre.
+                Manette tactile : le joystick part de l'endroit où le doigt se pose (moitié gauche) ; bouton de tir en bas à droite, 2e bouton au-dessus.
+                Manettes et claviers Bluetooth ou USB : reconnus directement.
+            """.trimIndent())
+            .setPositiveButton("Compris", null).show()
+    }
+
+    /** Toucher l'écran rallume la barre rapide */
+    override fun dispatchTouchEvent(e: MotionEvent): Boolean {
+        if (e.actionMasked == MotionEvent.ACTION_DOWN) {
+            ui.removeCallbacks(dimBar)
+            bar.animate().cancel(); bar.alpha = 1f
+            ui.postDelayed(dimBar, 5000)
+        }
+        return super.dispatchTouchEvent(e)
     }
 
     /** Journal : d'abord les lignes utiles (disques, ROM, erreurs), puis la fin ; « Partager » envoie tout */
@@ -459,6 +523,7 @@ class EmuActivity : Activity(), SurfaceHolder.Callback {
 
     private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
     private fun toast(t: String) = Toast.makeText(this, t, Toast.LENGTH_LONG).show()
+    private fun toastShort(t: String) = Toast.makeText(this, t, Toast.LENGTH_SHORT).show()
 }
 
 /** Vue invisible qui reçoit le clavier virtuel : touches spéciales en événements, lettres en texte */

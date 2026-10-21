@@ -35,7 +35,10 @@ les réglages.
   (verrouillables), flèches et pavé numérique, libellés QWERTY ou AZERTY. Une touche tenue reste enfoncée.
 - **Clavier et manettes** Bluetooth ou USB, comme la version web : Inser = Help, Page préc./suiv. = touches Amiga,
   F12 = menu. Le clavier du téléphone reste disponible (menu).
-- **Barre rapide** : ⌨ clavier, ⤓ sauvegarde et ⤒ reprise rapides, ☰ menu. **Quatre emplacements** de sauvegarde
+- **Écran d'accueil** en cartes : résumé de la machine, préréglages en un geste (AGS / Workbench, A1200 d'origine,
+  Amiga 500), bouton « Allumer » toujours visible, aide au premier lancement.
+- **Barre rapide** (s'estompe d'elle-même) : ⌨ clavier, 🖱/🕹 souris ou manette tactile, ⏸ pause, ⤓ sauvegarde et
+  ⤒ reprise rapides, ☰ menu rangé par thèmes ; confirmation avant de réinitialiser ou d'éteindre. **Quatre emplacements** de sauvegarde
   d'état par machine, et **deux lecteurs de disquettes** (DF0:, DF1:).
 - Pause, réinitialisation (redémarrage à froid), image en 4:3 ou sur toute la largeur.
 - **Rapport de plantage** : si l'émulation s'arrête brutalement, l'écran des réglages propose de partager un rapport
