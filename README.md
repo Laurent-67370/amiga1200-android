@@ -37,7 +37,9 @@ les réglages.
   F12 = menu. Le clavier du téléphone reste disponible (menu).
 - **Barre rapide** : ⌨ clavier, ⤓ sauvegarde et ⤒ reprise rapides, ☰ menu. **Quatre emplacements** de sauvegarde
   d'état par machine, et **deux lecteurs de disquettes** (DF0:, DF1:).
-- Pause, réinitialisation, image en 4:3 ou sur toute la largeur.
+- Pause, réinitialisation (redémarrage à froid), image en 4:3 ou sur toute la largeur.
+- **Rapport de plantage** : si l'émulation s'arrête brutalement, l'écran des réglages propose de partager un rapport
+  (pile d'appels du cœur et fin du journal).
 - **Mesure de vitesse** : le coin de l'écran affiche les images par seconde, le pourcentage du temps réel et
   le temps de calcul d'une image. Le **Turbo** (menu) fait tourner l'Amiga sans frein : comparez les images par
   seconde avec et sans JIT.

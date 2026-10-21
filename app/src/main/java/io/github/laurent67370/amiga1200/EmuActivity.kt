@@ -214,7 +214,7 @@ class EmuActivity : Activity(), SurfaceHolder.Callback {
         m.menu.add(0, 6, 0, "Sauvegardes d'état…")
         m.menu.add(0, 8, 0, if (s.fill) "Image en 4:3" else "Pleine largeur")
         m.menu.add(0, 9, 0, if (s.showSpeed) "Masquer la vitesse" else "Afficher la vitesse")
-        m.menu.add(0, 10, 0, "Réinitialiser l'Amiga")
+        m.menu.add(0, 10, 0, "Réinitialiser l'Amiga (redémarrage)")
         m.menu.add(0, 12, 0, "Journal (diagnostic)")
         m.menu.add(0, 11, 0, "Éteindre")
         m.setOnMenuItemClickListener {
@@ -229,7 +229,7 @@ class EmuActivity : Activity(), SurfaceHolder.Callback {
                 6 -> states()
                 8 -> { s.fill = !s.fill; root.requestLayout() }
                 9 -> { s.showSpeed = !s.showSpeed }
-                10 -> Native.reset()
+                10 -> restart()
                 11 -> quit()
                 12 -> journal()
             }
@@ -337,6 +337,16 @@ class EmuActivity : Activity(), SurfaceHolder.Callback {
         if (d == 0) { s.df0 = uri.toString(); s.df0Name = name } else { s.df1 = uri.toString(); s.df1Name = name }
         Native.insertDisk(d, path)
         toast("DF$d: $name")
+    }
+
+    /** Réinitialisation : le cœur avec JIT plante en réinstallant sa mémoire (réinitialisation interne), on rallume donc
+     *  l'Amiga à froid dans un nouveau processus, comme à l'allumage. L'écran des réglages relance l'émulation. */
+    private fun restart() {
+        startActivity(Intent(this, MainActivity::class.java).apply {
+            addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+            putExtra(MainActivity.EXTRA_RESTART, true)
+        })
+        quit()
     }
 
     private fun quit() {
