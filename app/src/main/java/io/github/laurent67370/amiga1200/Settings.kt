@@ -56,14 +56,17 @@ object Disks {
     fun link(ctx: Context, uriText: String, name: String): String? {
         if (uriText.isEmpty()) return null
         val uri = Uri.parse(uriText)
-        val pfd = try { ctx.contentResolver.openFileDescriptor(uri, "rw") } catch (_: Exception) { null }
-            ?: try { ctx.contentResolver.openFileDescriptor(uri, "r") } catch (_: Exception) { null }
+        var mode = "rw"
+        val pfd = try { ctx.contentResolver.openFileDescriptor(uri, "rw") } catch (e: Exception) { Native.log("$name : écriture refusée ($e)"); null }
+            ?: try { mode = "r"; ctx.contentResolver.openFileDescriptor(uri, "r") } catch (e: Exception) { Native.log("$name : lecture refusée ($e)"); null }
             ?: return null
         open += pfd
         val dir = File(ctx.filesDir, "media").apply { mkdirs() }
         val f = File(dir, safe(name))
         f.delete()
-        return try { Os.symlink("/proc/self/fd/${pfd.fd}", f.path); f.path } catch (_: Exception) { null }
+        val target = try { Os.readlink("/proc/self/fd/${pfd.fd}") } catch (_: Exception) { "?" }
+        Native.log("$name : ouvert en $mode, ${pfd.statSize} octets, descripteur ${pfd.fd} → $target")
+        return try { Os.symlink("/proc/self/fd/${pfd.fd}", f.path); f.path } catch (e: Exception) { Native.log("$name : lien impossible ($e)"); null }
     }
 
     fun copy(ctx: Context, uri: Uri, dest: File): Boolean = try {
@@ -117,6 +120,7 @@ object Config {
         val f = File(ctx.filesDir, "cfg/amiga.uae")
         f.parentFile?.mkdirs()
         f.writeText(l.joinToString("\n") + "\n")
+        Native.log("Configuration :\n" + l.joinToString("\n"))
         return f
     }
 }

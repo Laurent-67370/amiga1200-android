@@ -59,7 +59,7 @@ FLAGS=(-O3 -fPIC -DFE_AMIBERRY -I"$HERE/compat" -I"$SRC/libretro")
 find "$SRC/src" "$SRC/libretro" "$SRC/external" -name '*.o' | sort >objs.txt
 [ "$(wc -l <objs.txt)" -ge 300 ] || { echo "compilation incomplète, voir $OUT/make.log" >&2; exit 1; }
 "$CXX" -shared -fPIC -o "$LIBS/libamiga.so" frontend.o jni_bridge.o @objs.txt \
-  -Wl,--no-undefined -Wl,--gc-sections -Wl,-z,max-page-size=16384 \
+  -Wl,--no-undefined -Wl,--gc-sections -Wl,--wrap=retro_set_environment -Wl,--wrap=fopen -Wl,-z,max-page-size=16384 \
   -landroid -laaudio -llog -lz -ldl -lm -static-libstdc++
 "$LLVM/llvm-strip" --strip-unneeded "$LIBS/libamiga.so"
 

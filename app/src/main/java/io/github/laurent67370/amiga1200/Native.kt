@@ -6,6 +6,10 @@ import android.view.Surface
 object Native {
     init { System.loadLibrary("amiga") }
 
+    /** Journal du cœur et de l'application (menu → Journal) */
+    external fun setLogFile(path: String)
+    external fun log(message: String)
+
     external fun setDirs(sys: String, save: String)
     external fun setOption(key: String, value: String)
     external fun setSurface(surface: Surface?)
