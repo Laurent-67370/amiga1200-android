@@ -201,15 +201,65 @@ static AAudioStream *astream;
 static volatile int audio_mute;
 static int32_t audio_rate;
 
+/* Lecture sans grésillement : le cœur livre le son par paquets d'une image (20 ms), irrégulièrement (temps de calcul
+ * variable, fil de l'émulation endormi par Android), alors qu'AAudio en demande de petits morceaux à intervalles
+ * réguliers. Comme dans la version web, une file d'attente garde une réserve visée (50 ms au départ) : la lecture
+ * attend que la réserve soit pleine, puis lit un peu plus vite ou plus lentement (au plus 0,5 %, inaudible) pour la
+ * garder à sa cible. Un manque relève la cible de 10 ms (jusqu'à 150 ms), une minute sans manque la redescend ;
+ * au-delà du triple de la cible (reprise après une pause), les plus vieux échantillons sont jetés. La lecture
+ * interpole entre deux échantillons, ce qui convertit aussi la fréquence du cœur vers celle de l'appareil. */
+#define AQ_FRAMES 65536
+static float aq[AQ_FRAMES * 2];
+static unsigned aq_n;            /* trames en réserve */
+static double aq_pos;            /* position de lecture (fraction de trame) dans la réserve */
+static int aq_playing;
+static double aq_target_ms = 50, aq_core_rate = 44100;
+static long aq_calm;             /* trames lues depuis le dernier manque */
+
+static void aq_drop(unsigned n) {
+  if (n >= aq_n) { aq_n = 0; aq_pos = 0; return; }
+  memmove(aq, aq + n * 2, (size_t)(aq_n - n) * 2 * sizeof(float));
+  aq_n -= n;
+  aq_pos -= n;
+  if (aq_pos < 0) aq_pos = 0;
+}
+
 static aaudio_data_callback_result_t audio_cb(AAudioStream *s, void *user, void *data, int32_t frames) {
   (void)s; (void)user;
   float *d = data;
-  /* Retard borné : au-delà de 120 ms en attente (à-coup, reprise après une pause), les plus vieux échantillons
-     sont jetés pour revenir vers 40 ms */
-  unsigned av = fe_audio_available(), hi = (unsigned)audio_rate * 12 / 100, target = (unsigned)audio_rate * 4 / 100;
-  if (av > hi + (unsigned)frames) fe_audio_read(NULL, av - target - (unsigned)frames);
-  unsigned got = audio_mute ? 0 : fe_audio_read(d, (unsigned)frames);
-  if (got < (unsigned)frames) memset(d + got * 2, 0, (size_t)(frames - got) * 2 * sizeof(float));
+  /* Tout ce que le cœur a produit rejoint la réserve */
+  if (aq_n < AQ_FRAMES) aq_n += fe_audio_read(aq + aq_n * 2, AQ_FRAMES - aq_n);
+  unsigned target = (unsigned)(aq_core_rate * aq_target_ms / 1000);
+  if (aq_n > target * 3) aq_drop(aq_n - target);
+  if (audio_mute || !aq_playing) {
+    memset(d, 0, (size_t)frames * 2 * sizeof(float));
+    if (!audio_mute && aq_n >= target) aq_playing = 1;
+    return AAUDIO_CALLBACK_RESULT_CONTINUE;
+  }
+  /* Vitesse de lecture : fréquence du cœur / fréquence de l'appareil, corrigée selon l'écart à la cible */
+  double err = ((double)aq_n - target) / (target ? target : 1);
+  if (err > 1) err = 1; else if (err < -1) err = -1;
+  double step = aq_core_rate / audio_rate * (1 + 0.005 * err);
+  int32_t i = 0;
+  for (; i < frames; i++) {
+    unsigned k = (unsigned)aq_pos;
+    if (k + 1 >= aq_n) break;
+    float f = (float)(aq_pos - k);
+    d[i * 2] = aq[k * 2] + (aq[k * 2 + 2] - aq[k * 2]) * f;
+    d[i * 2 + 1] = aq[k * 2 + 1] + (aq[k * 2 + 3] - aq[k * 2 + 1]) * f;
+    aq_pos += step;
+  }
+  if (i < frames) {
+    /* Manque : silence, réserve plus grande, on attend qu'elle se remplisse */
+    memset(d + i * 2, 0, (size_t)(frames - i) * 2 * sizeof(float));
+    aq_playing = 0;
+    if (aq_target_ms < 150) aq_target_ms += 10;
+    aq_calm = 0;
+  } else if ((aq_calm += frames) > audio_rate * 60L && aq_target_ms > 50) {
+    aq_target_ms -= 10;
+    aq_calm = 0;
+  }
+  aq_drop((unsigned)aq_pos);
   return AAUDIO_CALLBACK_RESULT_CONTINUE;
 }
 static void audio_open(void) {
@@ -217,6 +267,7 @@ static void audio_open(void) {
   AAudioStreamBuilder *b;
   if (AAudio_createStreamBuilder(&b) != AAUDIO_OK) return;
   audio_rate = (int32_t)(fe_sample_rate() > 0 ? fe_sample_rate() : 44100);
+  aq_core_rate = audio_rate;
   AAudioStreamBuilder_setFormat(b, AAUDIO_FORMAT_PCM_FLOAT);
   AAudioStreamBuilder_setChannelCount(b, 2);
   AAudioStreamBuilder_setSampleRate(b, audio_rate);
@@ -226,7 +277,7 @@ static void audio_open(void) {
   if (AAudioStreamBuilder_openStream(b, &astream) == AAUDIO_OK) {
     audio_rate = AAudioStream_getSampleRate(astream);
     AAudioStream_requestStart(astream);
-    LOG("son : %d Hz", audio_rate);
+    LOG("son : %d Hz (cœur %.0f Hz)", audio_rate, aq_core_rate);
   } else astream = NULL;
   AAudioStreamBuilder_delete(b);
 }
