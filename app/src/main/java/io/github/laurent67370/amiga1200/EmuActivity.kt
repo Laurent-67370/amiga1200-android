@@ -96,7 +96,11 @@ class EmuActivity : Activity(), SurfaceHolder.Callback {
     }
 
     // ---------- démarrage ----------
+    private fun logFile() = File(filesDir, "journal.txt")
+
     private fun boot() {
+        Native.setLogFile(logFile().path)
+        Native.log("amiga1200-android ${BuildConfig.VERSION_NAME}, Android ${Build.VERSION.RELEASE}, ${Build.MANUFACTURER} ${Build.MODEL}")
         val df0 = Disks.link(this, s.df0, s.df0Name)
         val dh0 = Disks.link(this, s.dh0, s.dh0Name)
         if (s.df0.isNotEmpty() && df0 == null) toast("Disquette ${s.df0Name} : accès refusé, choisissez-la à nouveau")
@@ -191,6 +195,7 @@ class EmuActivity : Activity(), SurfaceHolder.Callback {
         m.menu.add(0, 8, 0, if (s.fill) "Image en 4:3" else "Pleine largeur")
         m.menu.add(0, 9, 0, if (s.showSpeed) "Masquer la vitesse" else "Afficher la vitesse")
         m.menu.add(0, 10, 0, "Réinitialiser l'Amiga")
+        m.menu.add(0, 12, 0, "Journal (diagnostic)")
         m.menu.add(0, 11, 0, "Éteindre")
         m.setOnMenuItemClickListener {
             when (it.itemId) {
@@ -205,10 +210,33 @@ class EmuActivity : Activity(), SurfaceHolder.Callback {
                 9 -> { s.showSpeed = !s.showSpeed }
                 10 -> Native.reset()
                 11 -> quit()
+                12 -> journal()
             }
             true
         }
         m.show()
+    }
+
+    /** Journal : d'abord les lignes utiles (disques, ROM, erreurs), puis la fin ; « Partager » envoie tout */
+    private fun journal() {
+        val all = try { logFile().readText() } catch (_: Exception) { "" }
+        val lines = all.lines()
+        val key = Regex("(?i)hfd|hardfile|hdf|dh0|uaehf|filesys|rdb|rdsk|partition|kick|rom|disk|floppy|adf|error|erreur|fail|cannot|refus|denied|ouvert|lien|configuration")
+        val important = lines.filter { key.containsMatchIn(it) }.takeLast(150)
+        val text = "— Lignes utiles —\n" + important.joinToString("\n") + "\n\n— Fin du journal —\n" + lines.takeLast(80).joinToString("\n")
+        val tv = TextView(this).apply { this.text = text; textSize = 11f; setTextIsSelectable(true); setPadding(dp(12), dp(8), dp(12), dp(8)) }
+        android.app.AlertDialog.Builder(this)
+            .setTitle("Journal du cœur")
+            .setView(android.widget.ScrollView(this).apply { addView(tv) })
+            .setPositiveButton("Partager") { _, _ ->
+                startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).apply {
+                    type = "text/plain"
+                    putExtra(Intent.EXTRA_SUBJECT, "Journal amiga1200-android")
+                    putExtra(Intent.EXTRA_TEXT, all.takeLast(200_000))
+                }, "Partager le journal"))
+            }
+            .setNegativeButton("Fermer", null)
+            .show()
     }
 
     private fun statePath() = File(Config.saveDir(this), "etat-${s.model}.uss").path

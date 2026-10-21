@@ -34,6 +34,7 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
     packaging { jniLibs { useLegacyPackaging = false } }
+    buildFeatures { buildConfig = true }
 }
 
 kotlin { compilerOptions { jvmTarget.set(JvmTarget.JVM_17) } }

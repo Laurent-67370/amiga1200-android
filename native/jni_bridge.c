@@ -14,6 +14,10 @@
 #include <android/log.h>
 #include <android/native_window_jni.h>
 #include <aaudio/AAudio.h>
+#include <stdarg.h>
+#include <errno.h>
+#include <fcntl.h>
+#include "libretro.h"
 
 #define LOG(...) __android_log_print(ANDROID_LOG_INFO, "amiga1200", __VA_ARGS__)
 
@@ -58,6 +62,91 @@ static char *jstr(JNIEnv *env, jstring s) {
   char *r = strdup(c);
   (*env)->ReleaseStringUTFChars(env, s, c);
   return r;
+}
+
+/* ---------- journal ----------
+ * Le frontal ne garde que les avertissements du cœur. Ici, tout ce que le cœur écrit va dans le journal d'Android
+ * et dans un fichier que l'application affiche (menu → Journal) : on intercepte retro_set_environment
+ * (édition des liens avec --wrap) pour lui donner notre propre fonction de journal. */
+static pthread_mutex_t log_mtx = PTHREAD_MUTEX_INITIALIZER;
+static FILE *log_file;
+static long log_bytes;
+#define LOG_MAX (4L << 20)
+
+static void log_line(int level, const char *msg) {
+  __android_log_write(level >= RETRO_LOG_ERROR ? ANDROID_LOG_ERROR : level >= RETRO_LOG_WARN ? ANDROID_LOG_WARN : ANDROID_LOG_INFO, "amiga1200", msg);
+  pthread_mutex_lock(&log_mtx);
+  if (log_file && log_bytes < LOG_MAX) {
+    size_t n = strlen(msg);
+    fputs(msg, log_file);
+    if (!n || msg[n - 1] != '\n') { fputc('\n', log_file); n++; }
+    fflush(log_file);
+    log_bytes += (long)n;
+  }
+  pthread_mutex_unlock(&log_mtx);
+}
+static void core_log(enum retro_log_level level, const char *fmt, ...) {
+  char buf[2048];
+  va_list a; va_start(a, fmt); vsnprintf(buf, sizeof buf, fmt, a); va_end(a);
+  log_line(level, buf);
+}
+static retro_environment_t real_env;
+static bool env_wrap(unsigned cmd, void *data) {
+  if (cmd == RETRO_ENVIRONMENT_GET_LOG_INTERFACE) { ((struct retro_log_callback *)data)->log = core_log; return true; }
+  return real_env(cmd, data);
+}
+void __real_retro_set_environment(retro_environment_t cb);
+void __wrap_retro_set_environment(retro_environment_t cb) {
+  real_env = cb;
+  __real_retro_set_environment(env_wrap);
+}
+JNIEXPORT void JNICALL JNI(setLogFile)(JNIEnv *env, jobject self, jstring path) {
+  (void)self;
+  char *p = jstr(env, path);
+  pthread_mutex_lock(&log_mtx);
+  if (log_file) fclose(log_file);
+  log_file = fopen(p, "w");
+  log_bytes = 0;
+  pthread_mutex_unlock(&log_mtx);
+  free(p);
+}
+JNIEXPORT void JNICALL JNI(log)(JNIEnv *env, jobject self, jstring msg) {
+  (void)self;
+  char *m = jstr(env, msg);
+  if (m) { log_line(RETRO_LOG_INFO, m); free(m); }
+}
+
+/* ---------- disques choisis par l'utilisateur ----------
+ * L'application ouvre chaque document (Storage Access Framework) et pose un lien symbolique, à son vrai nom,
+ * vers son descripteur (/proc/self/fd/N). Rouvrir ce chemin passe par les droits d'accès au fichier d'origine,
+ * que l'application n'a pas (dossier Téléchargements…) : si fopen échoue sur un tel lien, on repart du descripteur
+ * déjà ouvert (copie par dup). fopen est détourné à l'édition des liens (--wrap=fopen). */
+FILE *__real_fopen(const char *path, const char *mode);
+FILE *__wrap_fopen(const char *path, const char *mode) {
+  FILE *f = __real_fopen(path, mode);
+  if (f || !path || !mode) return f;
+  int err = errno, fd;
+  char tgt[64];
+  ssize_t n = readlink(path, tgt, sizeof tgt - 1);
+  if (n > 0) {
+    tgt[n] = 0;
+    if (sscanf(tgt, "/proc/self/fd/%d", &fd) == 1) {
+      int acc = fcntl(fd, F_GETFL) & O_ACCMODE;
+      int wants_write = strchr(mode, '+') || mode[0] == 'w' || mode[0] == 'a';
+      if (acc >= 0 && (!wants_write || acc == O_RDWR)) {
+        int d = dup(fd);
+        if (d >= 0) {
+          f = fdopen(d, mode);
+          if (f) fseek(f, 0, mode[0] == 'a' ? SEEK_END : SEEK_SET);
+          else close(d);
+        }
+      }
+      core_log(f ? RETRO_LOG_INFO : RETRO_LOG_WARN, "fopen(%s, %s) : %s par le descripteur %d (accès direct refusé : %s)",
+               path, mode, f ? "ouvert" : "échec", fd, strerror(err));
+    }
+  }
+  if (!f) errno = err;
+  return f;
 }
 
 /* ---------- affichage ---------- */
