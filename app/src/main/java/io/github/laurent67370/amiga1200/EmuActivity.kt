@@ -102,10 +102,13 @@ class EmuActivity : Activity(), SurfaceHolder.Callback {
         Native.setLogFile(logFile().path)
         Native.log("amiga1200-android ${BuildConfig.VERSION_NAME}, Android ${Build.VERSION.RELEASE}, ${Build.MANUFACTURER} ${Build.MODEL}")
         val df0 = Disks.link(this, s.df0, s.df0Name)
-        val dh0 = Disks.link(this, s.dh0, s.dh0Name)
         if (s.df0.isNotEmpty() && df0 == null) toast("Disquette ${s.df0Name} : accès refusé, choisissez-la à nouveau")
-        if (s.dh0.isNotEmpty() && dh0 == null) toast("Disque dur ${s.dh0Name} : accès refusé, choisissez-le à nouveau")
-        val cfg = Config.write(this, s, df0, dh0)
+        val hds = s.hds.mapIndexedNotNull { i, h ->
+            // Nom précédé du numéro : deux disques de même nom venant de dossiers différents restent distincts
+            Disks.link(this, h.uri, "dh$i-${h.name}").also { if (it == null) toast("Disque dur ${h.name} : accès refusé, choisissez-le à nouveau") }
+        }
+        val shared = if (hds.isNotEmpty() && s.shared) Config.sharedDir(this) else null
+        val cfg = Config.write(this, s, df0, hds, shared)
         Native.setDirs(Config.sysDir(this).path, Config.saveDir(this).path)
         // Options du cœur : celles de la version web (cadrage automatique, pas de barre d'état, manette 0 au port joystick)
         Native.setOption("amiberry_crop_overscan", "enabled")
@@ -179,6 +182,7 @@ class EmuActivity : Activity(), SurfaceHolder.Callback {
 
     override fun onResume() {
         super.onResume()
+        immersive()
         if (!paused) Native.pause(false)
     }
 

@@ -25,7 +25,7 @@ class MainActivity : Activity() {
     private lateinit var s: Settings
     private lateinit var romText: TextView
     private lateinit var df0Text: TextView
-    private lateinit var dh0Text: TextView
+    private lateinit var hdList: LinearLayout
     private lateinit var jitSwitch: Switch
 
     override fun onCreate(state: Bundle?) {
@@ -68,9 +68,20 @@ class MainActivity : Activity() {
         df0Text = line(col)
         row(col, button("Choisir…") { pick(REQ_DF0) }, button("Éjecter") { s.df0 = ""; s.df0Name = ""; refresh() })
 
-        section(col, "Disque dur DH0: (.hdf, lu sur place)")
-        dh0Text = line(col)
-        row(col, button("Choisir…") { pick(REQ_DH0) }, button("Débrancher") { s.dh0 = ""; s.dh0Name = ""; refresh() })
+        section(col, "Disques durs (.hdf, lus sur place)")
+        hdList = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        col.addView(hdList)
+        row(col, button("Ajouter…") { pick(REQ_HD, multiple = true) })
+        col.addView(note("AGS : ajoutez tous ses disques (Workbench.hdf en premier, puis Work.hdf…). Plusieurs fichiers peuvent être choisis d'un coup. Le premier disque démarre."))
+        col.addView(Switch(this).apply {
+            text = "Volume SHARED: (sauvegardes AGS et WHDLoad)"; isChecked = s.shared
+            setOnCheckedChangeListener { _, on -> s.shared = on }
+        })
+        col.addView(note("Dossier sur le téléphone : Android/data/io.github.laurent67370.amiga1200/files/SHARED"))
+        col.addView(Switch(this).apply {
+            text = "Carte graphique RTG (Picasso96, uaegfx) : écrans haute résolution d'AGS et du Workbench"; isChecked = s.rtg
+            setOnCheckedChangeListener { _, on -> s.rtg = on }
+        })
 
         section(col, "Commandes")
         col.addView(Switch(this).apply {
@@ -93,13 +104,24 @@ class MainActivity : Activity() {
         romText.text = if (s.rom == "user" && File(Config.sysDir(this), "kick.rom").exists()) "Kickstart : ${s.romName}"
             else "AROS (ROM libre fournie) — pour les jeux, choisissez votre Kickstart 3.1 (A1200) ou 1.3 (A500)"
         df0Text.text = s.df0Name.ifEmpty { "aucune" }
-        dh0Text.text = s.dh0Name.ifEmpty { "aucun" }
+        hdList.removeAllViews()
+        val hds = s.hds
+        if (hds.isEmpty()) hdList.addView(TextView(this).apply { text = "aucun" })
+        hds.forEachIndexed { i, h ->
+            hdList.addView(LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
+                addView(TextView(this@MainActivity).apply { text = "DH$i: ${h.name}" }, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f))
+                if (i > 0) addView(button("↑") { s.hds = hds.toMutableList().apply { add(i - 1, removeAt(i)) }; refresh() })
+                addView(button("Retirer") { s.hds = hds.filterIndexed { j, _ -> j != i }; refresh() })
+            })
+        }
         jitSwitch.isEnabled = s.model == "A1200"
     }
 
-    private fun pick(req: Int) {
+    private fun pick(req: Int, multiple: Boolean = false) {
         val i = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
             addCategory(Intent.CATEGORY_OPENABLE); type = "*/*"
+            if (multiple) putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true)
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION or Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION)
         }
         startActivityForResult(i, req)
@@ -108,22 +130,38 @@ class MainActivity : Activity() {
     @Deprecated("API Activity simple, sans AndroidX")
     override fun onActivityResult(req: Int, res: Int, data: Intent?) {
         super.onActivityResult(req, res, data)
-        val uri: Uri = data?.data ?: return
-        if (res != RESULT_OK) return
+        if (res != RESULT_OK || data == null) return
+        if (req == REQ_HD) {
+            // Un ou plusieurs disques, ajoutés à la suite (8 au plus)
+            val uris = data.clipData?.let { c -> (0 until c.itemCount).map { c.getItemAt(it).uri } } ?: listOfNotNull(data.data)
+            val list = s.hds.toMutableList()
+            for (u in uris) {
+                if (list.size >= 8) { toast("8 disques durs au plus"); break }
+                keep(u)
+                if (list.none { it.uri == u.toString() }) list += Hd(u.toString(), Disks.displayName(this, u))
+            }
+            // Le Workbench d'AGS démarre : placé en premier s'il vient d'être ajouté
+            list.sortBy { if (it.name.equals("Workbench.hdf", true)) 0 else 1 }
+            s.hds = list
+            refresh()
+            return
+        }
+        val uri: Uri = data.data ?: return
         val name = Disks.displayName(this, uri)
         when (req) {
             REQ_ROM -> {
                 if (Disks.copy(this, uri, File(Config.sysDir(this), "kick.rom"))) { s.rom = "user"; s.romName = name }
                 else toast("Lecture du Kickstart impossible")
             }
-            REQ_DF0, REQ_DH0 -> {
-                // Accès gardé après redémarrage du téléphone ; écriture si le fournisseur l'accepte
-                try { contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION) }
-                catch (_: Exception) { try { contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION) } catch (_: Exception) {} }
-                if (req == REQ_DF0) { s.df0 = uri.toString(); s.df0Name = name } else { s.dh0 = uri.toString(); s.dh0Name = name }
-            }
+            REQ_DF0 -> { keep(uri); s.df0 = uri.toString(); s.df0Name = name }
         }
         refresh()
+    }
+
+    /** Accès gardé après redémarrage du téléphone ; écriture si le fournisseur l'accepte */
+    private fun keep(uri: Uri) {
+        try { contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION) }
+        catch (_: Exception) { try { contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION) } catch (_: Exception) {} }
     }
 
     private fun power() {
@@ -146,6 +184,6 @@ class MainActivity : Activity() {
     companion object {
         const val REQ_ROM = 1
         const val REQ_DF0 = 2
-        const val REQ_DH0 = 3
+        const val REQ_HD = 3
     }
 }
