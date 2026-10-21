@@ -98,6 +98,7 @@ class MainActivity : Activity() {
 
         setContentView(ScrollView(this).apply { addView(col); setBackgroundColor(Color.rgb(24, 26, 32)) })
         refresh()
+        if (intent?.getBooleanExtra(EXTRA_RESTART, false) == true) window.decorView.postDelayed({ power() }, 1200)
     }
 
     private fun refresh() {
@@ -168,6 +169,17 @@ class MainActivity : Activity() {
         startActivity(Intent(this, EmuActivity::class.java))
     }
 
+    override fun onResume() {
+        super.onResume()
+        CrashReport.check(this)
+    }
+
+    /** Redémarrage demandé par l'émulation (« Réinitialiser ») : rallumage une fois son ancien processus terminé */
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        if (intent.getBooleanExtra(EXTRA_RESTART, false)) window.decorView.postDelayed({ power() }, 1200)
+    }
+
     private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
     private fun toast(t: String) = Toast.makeText(this, t, Toast.LENGTH_LONG).show()
     private fun section(col: LinearLayout, t: String) = col.addView(TextView(this).apply {
@@ -185,5 +197,6 @@ class MainActivity : Activity() {
         const val REQ_ROM = 1
         const val REQ_DF0 = 2
         const val REQ_HD = 3
+        const val EXTRA_RESTART = "rallumer"
     }
 }

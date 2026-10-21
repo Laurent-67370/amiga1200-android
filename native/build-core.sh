@@ -61,7 +61,8 @@ find "$SRC/src" "$SRC/libretro" "$SRC/external" -name '*.o' | sort >objs.txt
 "$CXX" -shared -fPIC -o "$LIBS/libamiga.so" frontend.o jni_bridge.o @objs.txt \
   -Wl,--no-undefined -Wl,--gc-sections -Wl,--wrap=retro_set_environment -Wl,--wrap=fopen -Wl,-z,max-page-size=16384 \
   -landroid -laaudio -llog -lz -ldl -lm -static-libstdc++
-"$LLVM/llvm-strip" --strip-unneeded "$LIBS/libamiga.so"
+# Symboles gardés (pas les informations de débogage) : les rapports de plantage d'Android nomment les fonctions du cœur
+"$LLVM/llvm-strip" --strip-debug "$LIBS/libamiga.so"
 
 # ROM AROS libres (démarrage sans Kickstart)
 ASSETS="$ROOT/app/src/main/assets/aros"
