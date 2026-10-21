@@ -20,9 +20,9 @@ class Settings(ctx: Context) {
     private fun flag(k: String, v: Boolean) { p.edit().putBoolean(k, v).commit() }
 
     /** A1200 ou A500 */
-    var model: String get() = str("model", "A1200"); set(v) = put("model", v)
+    var model: String get() = str("model", "A1200"); set(v) { put("model", v); saveProfile() }
     /** JIT 68040 (A1200 seulement) */
-    var jit: Boolean get() = p.getBoolean("jit", true); set(v) = flag("jit", v)
+    var jit: Boolean get() = p.getBoolean("jit", true); set(v) { flag("jit", v); saveProfile() }
     var ntsc: Boolean get() = p.getBoolean("ntsc", false); set(v) = flag("ntsc", v)
     /** « aros » (ROM libre fournie) ou « user » (Kickstart copié dans files/sys/kick.rom) */
     var rom: String get() = str("rom", "aros"); set(v) = put("rom", v)
@@ -51,12 +51,44 @@ class Settings(ctx: Context) {
     /** Volume SHARED: (dossier de l'application) avec les disques durs, pour AGS et les sauvegardes WHDLoad */
     var shared: Boolean get() = p.getBoolean("shared", true); set(v) = flag("shared", v)
     /** Carte graphique RTG d'UAE (uaegfx, Picasso96) : écrans haute résolution d'AGS et du Workbench */
-    var rtg: Boolean get() = p.getBoolean("rtg", true); set(v) = flag("rtg", v)
+    var rtg: Boolean get() = p.getBoolean("rtg", true); set(v) { flag("rtg", v); saveProfile() }
     /** Manette tactile à l'écran (sinon l'écran tactile sert de souris) */
     var touchPad: Boolean get() = p.getBoolean("touchPad", false); set(v) = flag("touchPad", v)
     /** Image étirée sur toute la largeur (sinon 4:3) */
     var fill: Boolean get() = p.getBoolean("fill", false); set(v) = flag("fill", v)
     var showSpeed: Boolean get() = p.getBoolean("showSpeed", true); set(v) = flag("showSpeed", v)
+
+    // ---------- commandes ----------
+    /** Vitesse du pointeur de la souris tactile (1 = le pointeur suit le doigt) */
+    var mouseSpeed: Float get() = p.getFloat("mouseSpeed", 1f); set(v) { p.edit().putFloat("mouseSpeed", v).commit() }
+    /** Taille de la manette tactile */
+    var padSize: Float get() = p.getFloat("padSize", 1f); set(v) { p.edit().putFloat("padSize", v).commit() }
+    /** Boutons gauche et droit de la souris à l'écran (souris tactile) */
+    var mouseKeys: Boolean get() = p.getBoolean("mouseKeys", false); set(v) = flag("mouseKeys", v)
+    /** Manette : tir 1 et tir 2 échangés */
+    var swapFire: Boolean get() = p.getBoolean("swapFire", false); set(v) = flag("swapFire", v)
+    /** Manette : bouton B = haut (sauter dans les jeux de plate-forme) */
+    var jumpB: Boolean get() = p.getBoolean("jumpB", false); set(v) = flag("jumpB", v)
+
+    // ---------- réglages retenus par disque de démarrage ----------
+    /** Disque qui démarre : la disquette DF0:, sinon le premier disque dur */
+    fun bootKey() = df0Name.ifEmpty { hds.firstOrNull()?.name ?: "" }
+    private fun saveProfile() {
+        val k = bootKey()
+        if (k.isNotEmpty()) p.edit().putString("profil:$k", "${str("model", "A1200")};${p.getBoolean("jit", true)};${p.getBoolean("rtg", true)}").commit()
+    }
+    /** Reprend la machine retenue pour le disque de démarrage ; vrai si elle existait */
+    fun applyProfile(): Boolean {
+        val v = p.getString("profil:${bootKey()}", null)?.split(";") ?: return false
+        if (v.size < 3) return false
+        p.edit().putString("model", v[0]).putBoolean("jit", v[1] == "true").putBoolean("rtg", v[2] == "true").commit()
+        return true
+    }
+
+    // ---------- reprise où l'on en était ----------
+    /** Signature de la configuration : la reprise n'est proposée qu'avec la même machine et les mêmes disques */
+    fun signature() = listOf(model, jit, rtg, ntsc, rom, romName, df0, df1, hds.joinToString("|") { it.uri }).joinToString("#")
+    var resumeSig: String get() = str("resumeSig", ""); set(v) = put("resumeSig", v)
 }
 
 /** Fichiers choisis par l'utilisateur (Storage Access Framework). */
@@ -105,6 +137,8 @@ object Disks {
 object Config {
     fun sysDir(ctx: Context) = File(ctx.filesDir, "sys").apply { mkdirs() }
     fun saveDir(ctx: Context) = File(ctx.filesDir, "save").apply { mkdirs() }
+    /** État gardé à l'extinction (« Reprendre où j'en étais »), utilisé une seule fois */
+    fun resumeFile(ctx: Context) = File(saveDir(ctx), "reprise.uss")
 
     /** ROM AROS libres, copiées une fois depuis l'APK */
     private fun aros(ctx: Context) {

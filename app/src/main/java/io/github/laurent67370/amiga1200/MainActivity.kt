@@ -29,6 +29,7 @@ class MainActivity : Activity() {
     private lateinit var df0Text: TextView
     private lateinit var hdList: LinearLayout
     private lateinit var presets: LinearLayout
+    private lateinit var resumeBtn: Button
     private val switches = mutableListOf<Pair<Switch, () -> Boolean>>()
     private val choices = mutableListOf<Pair<TextView, () -> Boolean>>()
 
@@ -66,7 +67,7 @@ class MainActivity : Activity() {
         card(col, "💾 Disques") { c ->
             c.addView(label("Disquette DF0:"))
             df0Text = TextView(this).also { c.addView(it) }
-            c.addView(row(button("Insérer…") { pick(REQ_DF0) }, button("Éjecter") { s.df0 = ""; s.df0Name = ""; refresh() }))
+            c.addView(row(button("Insérer…") { pick(REQ_DF0) }, button("Éjecter") { s.df0 = ""; s.df0Name = ""; profile(); refresh() }))
             c.addView(label("Disques durs (lus sur place, sans copie)"))
             hdList = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
             c.addView(hdList)
@@ -90,6 +91,7 @@ class MainActivity : Activity() {
             c.addView(switch("Clavier Amiga en AZERTY", { s.azerty }) { s.azerty = it })
             c.addView(switch("Afficher la vitesse en haut de l'écran", { s.showSpeed }) { s.showSpeed = it })
             c.addView(switch("Image étirée sur toute la largeur", { s.fill }) { s.fill = it })
+            c.addView(row(button("Réglages des commandes…") { ControlsDialog.show(this, s) }))
         }
         col.addView(note("Version ${BuildConfig.VERSION_NAME} · même cœur que la version web laurent-67370.github.io/amiga1200"))
 
@@ -99,9 +101,16 @@ class MainActivity : Activity() {
             background = GradientDrawable().apply { cornerRadius = dp(14).toFloat(); setColor(ACCENT) }
             setOnClickListener { power() }
         }
+        // Reprendre où l'on en était : proposé après une extinction, avec la même machine et les mêmes disques
+        resumeBtn = Button(this).apply {
+            textSize = 17f; setTextColor(Color.WHITE); isAllCaps = false
+            background = GradientDrawable().apply { cornerRadius = dp(14).toFloat(); setColor(CHIP) }
+            setOnClickListener { startActivity(Intent(this@MainActivity, EmuActivity::class.java).putExtra(EmuActivity.EXTRA_RESUME, true)) }
+        }
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL; setBackgroundColor(BG)
             addView(ScrollView(this@MainActivity).apply { addView(col) }, LinearLayout.LayoutParams(MATCH_PARENT, 0, 1f))
+            addView(resumeBtn, LinearLayout.LayoutParams(MATCH_PARENT, dp(52)).apply { setMargins(dp(14), dp(6), dp(14), 0) })
             addView(power, LinearLayout.LayoutParams(MATCH_PARENT, dp(60)).apply { setMargins(dp(14), dp(6), dp(14), dp(14)) })
         }
         setContentView(root)
@@ -149,6 +158,11 @@ class MainActivity : Activity() {
             preset("A1200 d'origine", "68020, jeux AGA", s.model == "A1200" && !s.jit && !s.rtg) { s.model = "A1200"; s.jit = false; s.rtg = false }))
         presets.addView(row(
             preset("Amiga 500", "jeux et démos OCS", a500) { s.model = "A500"; s.jit = false; s.rtg = false }))
+        val rf = Config.resumeFile(this)
+        val canResume = rf.exists() && s.resumeSig == s.signature()
+        resumeBtn.visibility = if (canResume) View.VISIBLE else View.GONE
+        if (canResume) resumeBtn.text = "⏯  Reprendre où j'en étais (" +
+            java.text.SimpleDateFormat("dd/MM HH:mm", java.util.Locale.FRANCE).format(java.util.Date(rf.lastModified())) + ")"
         for ((sw, get) in switches) sw.isChecked = get()
         for ((v, on) in choices) {
             v.background = rounded(if (on()) ACCENT else CHIP)
@@ -205,6 +219,7 @@ class MainActivity : Activity() {
             // Le Workbench d'AGS démarre : placé en premier s'il vient d'être ajouté
             list.sortBy { if (it.name.equals("Workbench.hdf", true)) 0 else 1 }
             s.hds = list
+            profile()
             refresh()
             return
         }
@@ -215,9 +230,14 @@ class MainActivity : Activity() {
                 if (Disks.copy(this, uri, File(Config.sysDir(this), "kick.rom"))) { s.rom = "user"; s.romName = name }
                 else toast("Lecture du Kickstart impossible")
             }
-            REQ_DF0 -> { keep(uri); s.df0 = uri.toString(); s.df0Name = name }
+            REQ_DF0 -> { keep(uri); s.df0 = uri.toString(); s.df0Name = name; profile() }
         }
         refresh()
+    }
+
+    /** Machine retenue pour ce disque de démarrage (JIT ou non…) : reprise d'elle-même */
+    private fun profile() {
+        if (s.applyProfile()) toast("Réglages retenus pour ${s.bootKey()} repris")
     }
 
     /** Accès gardé après redémarrage du téléphone ; écriture si le fournisseur l'accepte */

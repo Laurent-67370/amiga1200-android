@@ -55,8 +55,16 @@ class EmuActivity : Activity(), SurfaceHolder.Callback {
     private var running = false
     private var paused = false
     private var turbo = false
-    private var padKeys = 0
-    private var padAxes = 0
+    /** Manettes : boutons et directions des joueurs 1 (port joystick) et 2 (port souris) ; la manette tactile joue 1 */
+    private val padKeys = IntArray(2)
+    private val padAxes = IntArray(2)
+    private var touchAxes = 0
+    /** Manette physique → joueur, dans l'ordre où elles se manifestent */
+    private val players = HashMap<Int, Int>()
+    /** Boutons de souris : par les gestes et par les boutons à l'écran */
+    private var mbGesture = 0
+    private var mbKeys = 0
+    private var mouseKeysView: View? = null
 
     override fun onCreate(state: Bundle?) {
         super.onCreate(state)
@@ -145,7 +153,11 @@ class EmuActivity : Activity(), SurfaceHolder.Callback {
         ui.post(object : Runnable {
             override fun run() {
                 when (Native.state()) {
-                    2 -> { running = true; Native.frames(); Native.busyUs(); ui.postDelayed(stats, 1000) }
+                    2 -> {
+                        running = true; Native.frames(); Native.busyUs(); ui.postDelayed(stats, 1000)
+                        if (intent.getBooleanExtra(EXTRA_RESUME, false)) ui.postDelayed({ resume() }, 1500)
+                        else Config.resumeFile(this@EmuActivity).delete() // les disques vont changer : l'ancien état ne vaut plus
+                    }
                     1 -> if (System.currentTimeMillis() - t0 < 30000) ui.postDelayed(this, 50) else fail("le cœur ne répond pas")
                     else -> fail("le cœur a refusé la configuration (Kickstart ou disque illisible ?)")
                 }
@@ -220,10 +232,11 @@ class EmuActivity : Activity(), SurfaceHolder.Callback {
         mm.add(0, 5, 0, "💾  Disquettes DF0: / DF1:")
         mm.add(0, 6, 0, "📁  Sauvegardes d'état")
         mm.add(0, 4, 0, if (s.touchPad) "🖱  Passer en souris tactile" else "🕹  Passer en manette tactile")
-        mm.addSubMenu(0, 100, 0, "⌨  Clavier").apply {
+        mm.addSubMenu(0, 100, 0, "🕹  Commandes").apply {
             add(0, 3, 0, if (kb == null) "Afficher le clavier Amiga" else "Masquer le clavier Amiga")
             add(0, 14, 0, if (s.azerty) "Lettres en QWERTY" else "Lettres en AZERTY")
             add(0, 13, 0, "Clavier du téléphone")
+            add(0, 16, 0, "Réglages des commandes…")
         }
         mm.addSubMenu(0, 101, 0, "🖥  Écran").apply {
             add(0, 8, 0, if (s.fill) "Image en 4:3" else "Image sur toute la largeur")
@@ -234,6 +247,7 @@ class EmuActivity : Activity(), SurfaceHolder.Callback {
             add(0, 12, 0, "Journal (diagnostic)")
             add(0, 15, 0, "Aide")
         }
+        if (s.model == "A1200") mm.add(0, 17, 0, if (s.jit) "⚡  Redémarrer sans JIT (démos)" else "⚡  Redémarrer avec le JIT")
         mm.add(0, 10, 0, "↺  Réinitialiser l'Amiga")
         mm.add(0, 11, 0, "⏻  Éteindre")
         m.setOnMenuItemClickListener {
@@ -249,9 +263,15 @@ class EmuActivity : Activity(), SurfaceHolder.Callback {
                 8 -> { s.fill = !s.fill; root.requestLayout() }
                 9 -> { s.showSpeed = !s.showSpeed }
                 10 -> confirm("Réinitialiser l'Amiga ?", "L'Amiga redémarre à froid avec les mêmes disques. Ce qui n'est pas enregistré dans l'Amiga est perdu.") { restart() }
-                11 -> confirm("Éteindre l'Amiga ?", "Ce qui n'est pas enregistré dans l'Amiga est perdu (pensez à ⤓ pour une sauvegarde d'état).") { quit() }
+                11 -> confirm("Éteindre l'Amiga ?", "L'Amiga est gardé tel quel : l'accueil proposera « Reprendre où j'en étais ».") { powerOff() }
                 12 -> journal()
                 15 -> help()
+                16 -> ControlsDialog.show(this, s) { applyControls() }
+                17 -> {
+                    s.jit = !s.jit  // retenu pour ce disque de démarrage
+                    toastShort(if (s.jit) "Redémarrage avec le JIT" else "Redémarrage sans JIT : 68020 d'origine")
+                    restart()
+                }
             }
             true
         }
@@ -413,6 +433,24 @@ class EmuActivity : Activity(), SurfaceHolder.Callback {
         quit()
     }
 
+    /** Extinction : l'état est gardé pour « Reprendre où j'en étais » (une seule fois, avec les mêmes disques) */
+    private fun powerOff() {
+        if (!running) { quit(); return }
+        setPaused(true)
+        toastShort("Extinction…")
+        Thread {
+            val ok = Native.saveState(Config.resumeFile(this).path)
+            ui.post { if (ok) s.resumeSig = s.signature(); quit() }
+        }.start()
+    }
+
+    private fun resume() {
+        val f = Config.resumeFile(this)
+        val ok = f.exists() && Native.loadState(f.path)
+        f.delete()
+        toast(if (ok) "Reprise où vous en étiez" else "Reprise impossible : l'Amiga redémarre normalement")
+    }
+
     private fun quit() {
         running = false
         Native.stop()
@@ -425,11 +463,11 @@ class EmuActivity : Activity(), SurfaceHolder.Callback {
     private val mouse = object : View.OnTouchListener {
         var lastX = 0f; var lastY = 0f; var startX = 0f; var startY = 0f; var accX = 0f; var accY = 0f
         var downAt = 0L; var moved = false; var drag = false; var twoFingers = false
-        val longPress = Runnable { if (!moved && !twoFingers) { drag = true; Native.mouseButtons(1) } }
+        val longPress = Runnable { if (!moved && !twoFingers) { drag = true; mbGesture = 1; sendMouseButtons() } }
 
         override fun onTouch(v: View, e: MotionEvent): Boolean {
             // Déplacement en pixels de l'Amiga : le pointeur suit le doigt à la même vitesse sur l'image
-            val scale = if (screen.width > 0 && Native.videoW() > 0) Native.videoW().toFloat() / screen.width else 1f
+            val scale = s.mouseSpeed * if (screen.width > 0 && Native.videoW() > 0) Native.videoW().toFloat() / screen.width else 1f
             when (e.actionMasked) {
                 MotionEvent.ACTION_DOWN -> {
                     lastX = e.x; lastY = e.y; startX = e.x; startY = e.y; accX = 0f; accY = 0f
@@ -447,7 +485,7 @@ class EmuActivity : Activity(), SurfaceHolder.Callback {
                 MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
                     ui.removeCallbacks(longPress)
                     when {
-                        drag -> Native.mouseButtons(0)
+                        drag -> { mbGesture = 0; sendMouseButtons() }
                         twoFingers -> click(2)
                         !moved && e.eventTime - downAt < 300 -> click(1)
                     }
@@ -458,19 +496,68 @@ class EmuActivity : Activity(), SurfaceHolder.Callback {
     }
 
     private fun click(button: Int) {
-        Native.mouseButtons(button)
-        ui.postDelayed({ Native.mouseButtons(0) }, 60)
+        mbGesture = button; sendMouseButtons()
+        ui.postDelayed({ mbGesture = 0; sendMouseButtons() }, 60)
+    }
+
+    private fun sendMouseButtons() = Native.mouseButtons(mbGesture or mbKeys)
+
+    /** Boutons gauche et droit de la souris en bas de l'écran (souris tactile) */
+    private fun setMouseKeys(on: Boolean) {
+        mouseKeysView?.let { root.removeView(it) }
+        mouseKeysView = null
+        mbKeys = 0
+        if (!on) return
+        fun key(label: String, bit: Int, gravity: Int) = TextView(this).apply {
+            text = label; textSize = 16f; setTextColor(Color.WHITE); this.gravity = Gravity.CENTER
+            background = android.graphics.drawable.GradientDrawable().apply { cornerRadius = dp(14).toFloat(); setColor(Color.argb(90, 255, 255, 255)) }
+            setOnTouchListener { v, e ->
+                when (e.actionMasked) {
+                    MotionEvent.ACTION_DOWN -> { mbKeys = mbKeys or bit; v.alpha = 0.6f }
+                    MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> { mbKeys = mbKeys and bit.inv(); v.alpha = 1f }
+                }
+                sendMouseButtons(); true
+            }
+            layoutParams = FrameLayout.LayoutParams(dp(76), dp(64), Gravity.BOTTOM or gravity).apply { setMargins(dp(12), dp(12), dp(12), dp(12)) }
+        }
+        val holder = FrameLayout(this)
+        holder.addView(key("G", 1, Gravity.START))
+        holder.addView(key("D", 2, Gravity.END))
+        holder.isClickable = false
+        // Seuls les deux boutons captent le toucher : le reste de l'écran reste la souris
+        mouseKeysView = holder
+        root.addView(holder, 2, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+    }
+
+    /** Réglages des commandes modifiés : appliqués tout de suite */
+    private fun applyControls() {
+        setTouchPad(s.touchPad)
     }
 
     private fun setTouchPad(on: Boolean) {
         pad?.let { root.removeView(it) }
         pad = null
+        touchAxes = 0
         if (on) {
-            pad = TouchPad(this).also {
+            pad = TouchPad(this, s.padSize).also {
                 root.addView(it, 2, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
             }
         }
-        Native.joy(0, padKeys or padAxes)
+        setMouseKeys(!on && s.mouseKeys)
+        sendJoy(0)
+    }
+
+    private fun sendJoy(player: Int) = Native.joy(player, padKeys[player] or padAxes[player] or (if (player == 0) touchAxes else 0))
+
+    /** Joueur d'une manette physique : la première vue joue 1, la deuxième joue 2 */
+    private fun playerOf(deviceId: Int): Int = players.getOrPut(deviceId) { minOf(players.size, 1) }
+
+    /** Bouton de manette → bit du joystick, selon les réglages (tir échangés, B = haut) */
+    private fun padBit(keyCode: Int): Int {
+        if (s.jumpB && keyCode == KeyEvent.KEYCODE_BUTTON_B) return 1 shl 4
+        val b = Keymap.padBit(keyCode)
+        if (!s.swapFire) return b
+        return when (b) { 1 shl 0 -> 1 shl 8; 1 shl 8 -> 1 shl 0; else -> b }
     }
 
     // ---------- clavier et manettes ----------
@@ -484,11 +571,12 @@ class EmuActivity : Activity(), SurfaceHolder.Callback {
         if (e.keyCode == KeyEvent.KEYCODE_VOLUME_UP || e.keyCode == KeyEvent.KEYCODE_VOLUME_DOWN || e.keyCode == KeyEvent.KEYCODE_VOLUME_MUTE)
             return super.dispatchKeyEvent(e)
         val fromPad = e.isFromSource(InputDevice.SOURCE_GAMEPAD) || e.isFromSource(InputDevice.SOURCE_JOYSTICK)
-        val bit = if (fromPad || KeyEvent.isGamepadButton(e.keyCode)) Keymap.padBit(e.keyCode) else 0
+        val bit = if (fromPad || KeyEvent.isGamepadButton(e.keyCode)) padBit(e.keyCode) else 0
         if (bit != 0) {
             if (e.repeatCount == 0) {
-                padKeys = if (down) padKeys or bit else padKeys and bit.inv()
-                Native.joy(0, padKeys or padAxes)
+                val pl = playerOf(e.deviceId)
+                padKeys[pl] = if (down) padKeys[pl] or bit else padKeys[pl] and bit.inv()
+                sendJoy(pl)
             }
             return true
         }
@@ -509,7 +597,8 @@ class EmuActivity : Activity(), SurfaceHolder.Callback {
             if (y > 0.5f) m = m or (1 shl 5)
             if (x < -0.5f) m = m or (1 shl 6)
             if (x > 0.5f) m = m or (1 shl 7)
-            if (m != padAxes) { padAxes = m; Native.joy(0, padKeys or padAxes) }
+            val pl = playerOf(e.deviceId)
+            if (m != padAxes[pl]) { padAxes[pl] = m; sendJoy(pl) }
             return true
         }
         return super.onGenericMotionEvent(e)
@@ -517,11 +606,14 @@ class EmuActivity : Activity(), SurfaceHolder.Callback {
 
     /** Joystick tactile : touché par TouchPad */
     fun touchJoy(mask: Int) {
-        padAxes = mask
-        Native.joy(0, padKeys or padAxes)
+        touchAxes = mask
+        sendJoy(0)
     }
 
     private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
+    companion object {
+        const val EXTRA_RESUME = "reprendre"
+    }
     private fun toast(t: String) = Toast.makeText(this, t, Toast.LENGTH_LONG).show()
     private fun toastShort(t: String) = Toast.makeText(this, t, Toast.LENGTH_SHORT).show()
 }
