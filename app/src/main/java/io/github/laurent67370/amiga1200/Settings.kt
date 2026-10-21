@@ -5,7 +5,12 @@ import android.net.Uri
 import android.os.ParcelFileDescriptor
 import android.provider.OpenableColumns
 import android.system.Os
+import org.json.JSONArray
+import org.json.JSONObject
 import java.io.File
+
+/** Disque dur choisi : adresse du document (lu sur place) et son nom */
+data class Hd(val uri: String, val name: String)
 
 /** Réglages (partagés par l'écran des réglages et le processus de l'émulation, relus à chaque démarrage). */
 class Settings(ctx: Context) {
@@ -27,6 +32,22 @@ class Settings(ctx: Context) {
     var df0Name: String get() = str("df0Name", ""); set(v) = put("df0Name", v)
     var dh0: String get() = str("dh0", ""); set(v) = put("dh0", v)
     var dh0Name: String get() = str("dh0Name", ""); set(v) = put("dh0Name", v)
+    /** Disques durs DH0: à DH7: (l'ancien réglage DH0: seul est repris) */
+    var hds: List<Hd>
+        get() {
+            val j = p.getString("hds", null) ?: return if (dh0.isNotEmpty()) listOf(Hd(dh0, dh0Name)) else emptyList()
+            val a = try { JSONArray(j) } catch (_: Exception) { return emptyList() }
+            return (0 until a.length()).map { a.getJSONObject(it).let { o -> Hd(o.getString("uri"), o.getString("name")) } }
+        }
+        set(v) {
+            val a = JSONArray()
+            for (h in v) a.put(JSONObject().put("uri", h.uri).put("name", h.name))
+            put("hds", a.toString())
+        }
+    /** Volume SHARED: (dossier de l'application) avec les disques durs, pour AGS et les sauvegardes WHDLoad */
+    var shared: Boolean get() = p.getBoolean("shared", true); set(v) = flag("shared", v)
+    /** Carte graphique RTG d'UAE (uaegfx, Picasso96) : écrans haute résolution d'AGS et du Workbench */
+    var rtg: Boolean get() = p.getBoolean("rtg", true); set(v) = flag("rtg", v)
     /** Manette tactile à l'écran (sinon l'écran tactile sert de souris) */
     var touchPad: Boolean get() = p.getBoolean("touchPad", false); set(v) = flag("touchPad", v)
     /** Image étirée sur toute la largeur (sinon 4:3) */
@@ -89,7 +110,15 @@ object Config {
         }
     }
 
-    fun write(ctx: Context, s: Settings, df0: String?, dh0: String?): File {
+    /** Dossier du volume SHARED: (SaveGames créé d'avance, comme dans la version web) : dans le dossier de
+     *  l'application visible depuis un ordinateur (Android/data/…/files/SHARED) */
+    fun sharedDir(ctx: Context): File {
+        val d = File(ctx.getExternalFilesDir(null) ?: ctx.filesDir, "SHARED")
+        File(d, "SaveGames").mkdirs()
+        return d
+    }
+
+    fun write(ctx: Context, s: Settings, df0: String?, hds: List<String>, shared: File?): File {
         val sys = sysDir(ctx)
         val a500 = s.model == "A500"
         val l = mutableListOf("quickstart=${s.model},0")
@@ -115,8 +144,16 @@ object Config {
         } else l += listOf("cycle_exact=false", "cpu_compatible=false")
         l += "ntsc=${s.ntsc}"
         l += "gfx_resolution=hires"
-        // Disque dur sur le pilote d'UAE (uaehf.device) : démarre AGS et les Workbench préinstallés
-        if (dh0 != null) l += "hardfile2=rw,DH0:$dh0,0,0,0,512,0,,uae0"
+        // Carte RTG sur le Zorro III : il lui faut un processeur 32 bits (le 68EC020 de l'A1200 n'adresse que 16 Mo)
+        if (s.rtg && !a500) {
+            l += listOf("gfxcard_type=ZorroIII", "gfxcard_size=32")
+            if (!s.jit) l += listOf("cpu_model=68020", "cpu_24bit_addressing=false")
+        }
+        // Disques durs sur le pilote d'UAE (uaehf.device) : démarrent AGS et les Workbench préinstallés.
+        // Les disques RDB gardent les noms et priorités de démarrage de leurs partitions.
+        hds.forEachIndexed { i, path -> l += "hardfile2=rw,DH$i:$path,0,0,0,512,${if (i == 0) 0 else -1},,uae$i" }
+        // SHARED: : jamais un disque de démarrage
+        if (shared != null) l += "filesystem2=rw,DH12:SHARED:${shared.path},-128"
         val f = File(ctx.filesDir, "cfg/amiga.uae")
         f.parentFile?.mkdirs()
         f.writeText(l.joinToString("\n") + "\n")
