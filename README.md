@@ -41,6 +41,12 @@ les réglages.
   ⤒ reprise rapides, ☰ menu rangé par thèmes ; confirmation avant de réinitialiser ou d'éteindre. **Quatre emplacements** de sauvegarde
   d'état par machine, et **deux lecteurs de disquettes** (DF0:, DF1:).
 - Pause, réinitialisation (redémarrage à froid), image en 4:3 ou sur toute la largeur.
+- **Reprendre où j'en étais** : à l'extinction, l'Amiga est gardé tel quel ; l'accueil propose de le reprendre (même
+  machine, mêmes disques, une seule fois).
+- **JIT en un geste** : « Redémarrer sans JIT » dans le menu, pour les démos qui n'aiment pas le 68040. La machine
+  choisie est retenue pour le disque de démarrage (disquette ou premier disque dur).
+- **Réglages des commandes** : vitesse du pointeur, taille de la manette tactile, boutons G/D de la souris à
+  l'écran, tir 1 et 2 échangés, bouton B = haut (sauter). **Deux manettes** : la seconde joue sur le port souris.
 - **Rapport de plantage** : si l'émulation s'arrête brutalement, l'écran des réglages propose de partager un rapport
   (pile d'appels du cœur et fin du journal).
 - **Mesure de vitesse** : le coin de l'écran affiche les images par seconde, le pourcentage du temps réel et

@@ -12,7 +12,7 @@ import kotlin.math.min
 /** Manette tactile : moitié gauche = joystick (la direction part de l'endroit où le doigt se pose),
  *  moitié droite = bouton de tir (en bas) et 2e bouton (en haut). Plusieurs doigts à la fois. */
 @SuppressLint("ViewConstructor")
-class TouchPad(private val emu: EmuActivity) : View(emu) {
+class TouchPad(private val emu: EmuActivity, private val size: Float = 1f) : View(emu) {
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeWidth = 4f; color = Color.argb(110, 255, 255, 255) }
     private val fill = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.argb(70, 255, 255, 255) }
     private var stickId = -1
@@ -22,7 +22,7 @@ class TouchPad(private val emu: EmuActivity) : View(emu) {
     private val held = HashMap<Int, Int>()
     private var buttons = 0
 
-    private val r get() = min(width, height) * 0.16f
+    private val r get() = min(width, height) * 0.16f * size
 
     @SuppressLint("ClickableViewAccessibility")
     override fun onTouchEvent(e: MotionEvent): Boolean {
