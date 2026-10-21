@@ -30,6 +30,10 @@ class Settings(ctx: Context) {
     /** Disquette DF0: et disque dur DH0: : adresse du document choisi (lu sur place) et son nom */
     var df0: String get() = str("df0", ""); set(v) = put("df0", v)
     var df0Name: String get() = str("df0Name", ""); set(v) = put("df0Name", v)
+    var df1: String get() = str("df1", ""); set(v) = put("df1", v)
+    var df1Name: String get() = str("df1Name", ""); set(v) = put("df1Name", v)
+    /** Libellés du clavier Amiga à l'écran en AZERTY (clavier français de l'Amiga) */
+    var azerty: Boolean get() = p.getBoolean("azerty", false); set(v) = flag("azerty", v)
     var dh0: String get() = str("dh0", ""); set(v) = put("dh0", v)
     var dh0Name: String get() = str("dh0Name", ""); set(v) = put("dh0Name", v)
     /** Disques durs DH0: à DH7: (l'ancien réglage DH0: seul est repris) */
@@ -118,7 +122,7 @@ object Config {
         return d
     }
 
-    fun write(ctx: Context, s: Settings, df0: String?, hds: List<String>, shared: File?): File {
+    fun write(ctx: Context, s: Settings, df0: String?, df1: String?, hds: List<String>, shared: File?): File {
         val sys = sysDir(ctx)
         val a500 = s.model == "A500"
         val l = mutableListOf("quickstart=${s.model},0")
@@ -132,6 +136,7 @@ object Config {
         }
         l += listOf("nr_floppies=2", "floppy1type=0")
         if (df0 != null) l += "floppy0=$df0"
+        if (df1 != null) l += "floppy1=$df1"
         if (s.jit && !a500) {
             // JIT : 68040 traduit en code ARM64, à pleine vitesse, avec 64 Mo de Fast Zorro III
             l += listOf(

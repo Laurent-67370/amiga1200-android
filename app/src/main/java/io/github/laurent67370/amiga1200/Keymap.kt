@@ -19,8 +19,10 @@ object Keymap {
         put(KeyEvent.KEYCODE_NUMPAD_SUBTRACT, 269); put(KeyEvent.KEYCODE_NUMPAD_ADD, 270); put(KeyEvent.KEYCODE_NUMPAD_ENTER, 271)
         put(KeyEvent.KEYCODE_DPAD_UP, 273); put(KeyEvent.KEYCODE_DPAD_DOWN, 274)
         put(KeyEvent.KEYCODE_DPAD_RIGHT, 275); put(KeyEvent.KEYCODE_DPAD_LEFT, 276)
-        put(KeyEvent.KEYCODE_INSERT, 277); put(KeyEvent.KEYCODE_MOVE_HOME, 278); put(KeyEvent.KEYCODE_MOVE_END, 279)
-        put(KeyEvent.KEYCODE_PAGE_UP, 280); put(KeyEvent.KEYCODE_PAGE_DOWN, 281)
+        // Touches absentes des claviers de PC, placées comme dans la version web : Inser = Help, Page préc./suiv. =
+        // Amiga gauche/droite, Début/Fin = parenthèses du pavé (codes compris par le cœur, voir AmigaKeyboard)
+        put(KeyEvent.KEYCODE_INSERT, 281); put(KeyEvent.KEYCODE_MOVE_HOME, 295); put(KeyEvent.KEYCODE_MOVE_END, 296)
+        put(KeyEvent.KEYCODE_PAGE_UP, 311); put(KeyEvent.KEYCODE_PAGE_DOWN, 312)
         put(KeyEvent.KEYCODE_CAPS_LOCK, 301); put(KeyEvent.KEYCODE_SHIFT_RIGHT, 303); put(KeyEvent.KEYCODE_SHIFT_LEFT, 304)
         put(KeyEvent.KEYCODE_CTRL_RIGHT, 305); put(KeyEvent.KEYCODE_CTRL_LEFT, 306)
         put(KeyEvent.KEYCODE_ALT_RIGHT, 307); put(KeyEvent.KEYCODE_ALT_LEFT, 308)
