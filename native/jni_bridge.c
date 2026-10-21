@@ -34,6 +34,9 @@ void fe_mouse_move(int dx, int dy);
 void fe_mouse_buttons(int mask);
 void fe_joy(int port, unsigned mask);
 void fe_key_push(int down, unsigned retrok);
+void fe_key(int down, unsigned retrok);
+int fe_start(const char *path);
+void fe_run(void);
 int fe_led(int i);
 void fe_reset(void);
 double fe_fps(void);
@@ -215,6 +218,7 @@ static double aq_pos;            /* position de lecture (fraction de trame) dans
 static int aq_playing;
 static double aq_target_ms = 50, aq_core_rate = 44100;
 static long aq_calm;             /* trames lues depuis le dernier manque */
+static volatile unsigned long aq_pulls; /* appels du rappel AAudio : le son avance-t-il ? */
 
 static void aq_drop(unsigned n) {
   if (n >= aq_n) { aq_n = 0; aq_pos = 0; return; }
@@ -227,6 +231,7 @@ static void aq_drop(unsigned n) {
 static aaudio_data_callback_result_t audio_cb(AAudioStream *s, void *user, void *data, int32_t frames) {
   (void)s; (void)user;
   float *d = data;
+  aq_pulls++;
   /* Tout ce que le cœur a produit rejoint la réserve */
   if (aq_n < AQ_FRAMES) aq_n += fe_audio_read(aq + aq_n * 2, AQ_FRAMES - aq_n);
   unsigned target = (unsigned)(aq_core_rate * aq_target_ms / 1000);
@@ -301,38 +306,139 @@ JNIEXPORT void JNICALL JNI(setOption)(JNIEnv *env, jobject self, jstring k, jstr
   fe_set_option(a, b);
   free(a); free(b);
 }
+/* ---------- fil de l'émulation, cadencé par le son ----------
+ * Le frontal sait faire tourner le cœur dans son propre fil, à une horloge fixe (50 images/s). Mais l'Amiga change de
+ * fréquence d'image en route (démo en NTSC 60 Hz, écran RTG…) : à 50 images/s, il produit alors moins de son qu'il
+ * n'en faut et la musique se coupe. Ce fil-ci calcule une image dès que la réserve de son descend sous sa cible :
+ * l'émulation suit exactement l'horloge du son (comme la synchronisation audio de RetroArch), à la vraie cadence de
+ * l'Amiga. Sans son (pas encore ouvert, ou rappel AAudio arrêté), il revient à l'horloge fixe du frontal.
+ * Ce qui touche à l'état du cœur depuis l'interface (sauvegardes d'état) s'exécute dans ce fil, entre deux images. */
+static pthread_t emu_thr;
+static pthread_mutex_t emu_mtx = PTHREAD_MUTEX_INITIALIZER;
+static volatile int emu_state, emu_stop, emu_paused, emu_turbo;
+static char emu_path[1024];
+static volatile unsigned stat_frames;
+static volatile double stat_busy_us;
+#define KQ 256
+static unsigned kq[KQ];
+static volatile unsigned kq_w, kq_r;
+static pthread_mutex_t cmd_mtx = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t cmd_cv = PTHREAD_COND_INITIALIZER;
+static int cmd_code, cmd_res, cmd_done;   /* 1 sauvegarder, 2 reprendre */
+static void *cmd_buf;
+static unsigned cmd_len;
+
+static double now_ms(void) { struct timespec t; clock_gettime(CLOCK_MONOTONIC, &t); return t.tv_sec * 1000.0 + t.tv_nsec / 1e6; }
+
+static void emu_frame(void) {
+  double t0 = now_ms();
+  pthread_mutex_lock(&emu_mtx);
+  /* Une touche par image, dans l'ordre (l'Amiga voit chaque appui et chaque relâchement) */
+  if (kq_r != kq_w) { unsigned k = kq[kq_r]; kq_r = (kq_r + 1) % KQ; fe_key((k & 0x80000000u) != 0, k & 0x7fffffffu); }
+  fe_run();
+  pthread_mutex_unlock(&emu_mtx);
+  stat_busy_us += (now_ms() - t0) * 1000.0;
+  stat_frames++;
+}
+static void emu_cmd_run(void) {
+  pthread_mutex_lock(&cmd_mtx);
+  if (cmd_code && !cmd_done) {
+    pthread_mutex_lock(&emu_mtx);
+    cmd_res = cmd_code == 1 ? fe_state_save(cmd_buf, cmd_len) : fe_state_load(cmd_buf, cmd_len);
+    pthread_mutex_unlock(&emu_mtx);
+    cmd_done = 1;
+    pthread_cond_broadcast(&cmd_cv);
+  }
+  pthread_mutex_unlock(&cmd_mtx);
+}
+static int emu_cmd(int code, void *buf, unsigned len) {
+  if (emu_state != 2) return 0;
+  pthread_mutex_lock(&cmd_mtx);
+  cmd_code = code; cmd_buf = buf; cmd_len = len; cmd_done = 0; cmd_res = 0;
+  while (!cmd_done && emu_state == 2 && !emu_stop) {
+    struct timespec t; clock_gettime(CLOCK_REALTIME, &t); t.tv_nsec += 100000000; if (t.tv_nsec >= 1000000000) { t.tv_sec++; t.tv_nsec -= 1000000000; }
+    pthread_cond_timedwait(&cmd_cv, &cmd_mtx, &t);
+  }
+  int r = cmd_done ? cmd_res : 0;
+  cmd_code = 0;
+  pthread_mutex_unlock(&cmd_mtx);
+  return r;
+}
+
+static void *emu_main(void *arg) {
+  (void)arg;
+  pthread_mutex_lock(&emu_mtx);
+  int ok = fe_start(emu_path[0] ? emu_path : NULL);
+  pthread_mutex_unlock(&emu_mtx);
+  emu_state = ok ? 2 : -1;
+  if (!ok) return NULL;
+  double period = 1000.0 / (fe_fps() > 0 ? fe_fps() : 50.0), next = now_ms();
+  unsigned long last_pulls = aq_pulls;
+  double last_pull_t = now_ms();
+  while (!emu_stop) {
+    emu_cmd_run();
+    if (emu_paused) { usleep(4000); next = now_ms(); continue; }
+    double now = now_ms();
+    if (emu_turbo) { emu_frame(); next = now_ms(); continue; }   /* turbo : sans attendre */
+    /* Le son avance-t-il ? (rappel AAudio appelé dans les 200 dernières millisecondes) */
+    if (aq_pulls != last_pulls) { last_pulls = aq_pulls; last_pull_t = now; }
+    if (astream && now - last_pull_t < 200) {
+      /* Cadence du son : une image dès que la réserve (tampon du frontal + file de lecture) passe sous la cible */
+      unsigned queued = fe_audio_available() + aq_n;
+      unsigned want = (unsigned)(aq_core_rate * (aq_target_ms + 25) / 1000);
+      /* Au plus deux fois la cadence normale : un Amiga muet (son coupé dans le cœur) ne s'emballe pas */
+      if (queued < want && now >= next) { emu_frame(); next = now + period / 2; } else usleep(1000);
+      continue;
+    }
+    /* Horloge fixe, comme le frontal */
+    if (now < next) { double d = next - now; usleep(d > 2.0 ? (useconds_t)((d - 1.0) * 1000) : 200); continue; }
+    if (now - next > 250) next = now;
+    emu_frame();
+    next += period;
+  }
+  return NULL;
+}
+
 /* Démarre le fil de l'émulation sur le contenu (fichier .uae, disquette…) ; l'affichage suit */
 JNIEXPORT jboolean JNICALL JNI(start)(JNIEnv *env, jobject self, jstring path) {
   (void)self;
   char *p = jstr(env, path);
-  int ok = fe_thread_start(p);
+  snprintf(emu_path, sizeof emu_path, "%s", p ? p : "");
   free(p);
-  if (ok && !render_on) {
+  emu_state = 1;
+  pthread_attr_t a; pthread_attr_init(&a); pthread_attr_setstacksize(&a, 8u << 20);
+  if (pthread_create(&emu_thr, &a, emu_main, NULL)) { emu_state = 0; return JNI_FALSE; }
+  if (!render_on) {
     render_on = 1;
     pthread_create(&render_thr, NULL, render_main, NULL);
   }
-  return ok ? JNI_TRUE : JNI_FALSE;
+  return JNI_TRUE;
 }
 /* 1 en démarrage, 2 en marche (le son s'ouvre alors : le cœur a donné sa fréquence), -1 refus du cœur, 0 échec */
 JNIEXPORT jint JNICALL JNI(state)(JNIEnv *env, jobject self) {
   (void)env; (void)self;
-  int s = fe_thread_state();
+  int s = emu_state;
   if (s == 2) audio_open();
   return s;
 }
 JNIEXPORT void JNICALL JNI(pause)(JNIEnv *env, jobject self, jboolean p) {
   (void)env; (void)self;
-  fe_thread_pause(p);
+  emu_paused = p;
   audio_mute = p;
   if (p) fe_flush();
 }
-JNIEXPORT void JNICALL JNI(warp)(JNIEnv *env, jobject self, jint w) { (void)env; (void)self; fe_thread_warp(w); }
-JNIEXPORT void JNICALL JNI(reset)(JNIEnv *env, jobject self) { (void)env; (void)self; fe_reset(); }
+/* Turbo : le frontal jette alors le son (fe_thread_warp ne règle que ce drapeau, son propre fil ne tourne pas) */
+JNIEXPORT void JNICALL JNI(warp)(JNIEnv *env, jobject self, jint w) {
+  (void)env; (void)self;
+  emu_turbo = w > 1;
+  fe_thread_warp(w);
+}
+JNIEXPORT void JNICALL JNI(reset)(JNIEnv *env, jobject self) { (void)env; (void)self; }
 /* Arrêt : le cœur garde un état global, l'application redémarre son processus pour rallumer */
 JNIEXPORT void JNICALL JNI(stop)(JNIEnv *env, jobject self) {
   (void)env; (void)self;
   audio_close();
-  fe_thread_stop();
+  emu_stop = 1;
   render_on = 0;
   fe_flush();
 }
@@ -341,15 +447,21 @@ JNIEXPORT void JNICALL JNI(stop)(JNIEnv *env, jobject self) {
 JNIEXPORT void JNICALL JNI(mouseMove)(JNIEnv *env, jobject self, jint dx, jint dy) { (void)env; (void)self; fe_mouse_move(dx, dy); }
 JNIEXPORT void JNICALL JNI(mouseButtons)(JNIEnv *env, jobject self, jint m) { (void)env; (void)self; fe_mouse_buttons(m); }
 JNIEXPORT void JNICALL JNI(joy)(JNIEnv *env, jobject self, jint port, jint m) { (void)env; (void)self; fe_joy(port, (unsigned)m); }
-JNIEXPORT void JNICALL JNI(key)(JNIEnv *env, jobject self, jboolean down, jint retrok) { (void)env; (void)self; fe_key_push(down, (unsigned)retrok); }
+JNIEXPORT void JNICALL JNI(key)(JNIEnv *env, jobject self, jboolean down, jint retrok) {
+  (void)env; (void)self;
+  unsigned n = (kq_w + 1) % KQ;
+  if (n == kq_r) return;
+  kq[kq_w] = (unsigned)retrok | (down ? 0x80000000u : 0);
+  __atomic_store_n(&kq_w, n, __ATOMIC_RELEASE);
+}
 
 /* ---------- disquettes ---------- */
 JNIEXPORT void JNICALL JNI(insertDisk)(JNIEnv *env, jobject self, jint drive, jstring path) {
   (void)self;
   char *p = jstr(env, path);
-  fe_lock();
+  pthread_mutex_lock(&emu_mtx);
   if (p && *p) fe_drive_insert(drive, p); else fe_drive_eject(drive);
-  fe_unlock();
+  pthread_mutex_unlock(&emu_mtx);
   free(p);
 }
 
@@ -358,14 +470,14 @@ JNIEXPORT jboolean JNICALL JNI(saveState)(JNIEnv *env, jobject self, jstring pat
   (void)self;
   char *p = jstr(env, path);
   int ok = 0;
-  fe_lock();
+  pthread_mutex_lock(&emu_mtx);
   unsigned n = fe_state_size();
+  pthread_mutex_unlock(&emu_mtx);
   void *buf = n ? malloc(n) : NULL;
-  if (buf && fe_state_save(buf, n)) {
+  if (buf && emu_cmd(1, buf, n)) {
     FILE *f = fopen(p, "wb");
     if (f) { ok = fwrite(buf, 1, n, f) == n; fclose(f); }
   }
-  fe_unlock();
   free(buf); free(p);
   return ok ? JNI_TRUE : JNI_FALSE;
 }
@@ -378,15 +490,15 @@ JNIEXPORT jboolean JNICALL JNI(loadState)(JNIEnv *env, jobject self, jstring pat
   if (!f) return JNI_FALSE;
   fseek(f, 0, SEEK_END); long n = ftell(f); fseek(f, 0, SEEK_SET);
   void *buf = n > 0 ? malloc((size_t)n) : NULL;
-  if (buf && fread(buf, 1, (size_t)n, f) == (size_t)n) ok = fe_state_load(buf, (unsigned)n); /* exécuté entre deux images */
+  if (buf && fread(buf, 1, (size_t)n, f) == (size_t)n) ok = emu_cmd(2, buf, (unsigned)n); /* exécuté entre deux images */
   fclose(f); free(buf);
   return ok ? JNI_TRUE : JNI_FALSE;
 }
 
 /* ---------- mesures ---------- */
 /* Images calculées et temps de calcul (µs) depuis le dernier appel : la vitesse réelle et la charge */
-JNIEXPORT jint JNICALL JNI(frames)(JNIEnv *env, jobject self) { (void)env; (void)self; return (jint)fe_thread_frames(); }
-JNIEXPORT jdouble JNICALL JNI(busyUs)(JNIEnv *env, jobject self) { (void)env; (void)self; return fe_thread_busy(); }
+JNIEXPORT jint JNICALL JNI(frames)(JNIEnv *env, jobject self) { (void)env; (void)self; return (jint)__atomic_exchange_n(&stat_frames, 0, __ATOMIC_RELAXED); }
+JNIEXPORT jdouble JNICALL JNI(busyUs)(JNIEnv *env, jobject self) { (void)env; (void)self; double b = stat_busy_us; stat_busy_us = 0; return b; }
 JNIEXPORT jdouble JNICALL JNI(fps)(JNIEnv *env, jobject self) { (void)env; (void)self; return fe_fps(); }
 JNIEXPORT jint JNICALL JNI(videoW)(JNIEnv *env, jobject self) { (void)env; (void)self; return (jint)fe_video_w(); }
 JNIEXPORT jint JNICALL JNI(videoH)(JNIEnv *env, jobject self) { (void)env; (void)self; return (jint)fe_video_h(); }
