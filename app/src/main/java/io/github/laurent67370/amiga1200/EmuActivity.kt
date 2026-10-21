@@ -1,0 +1,379 @@
+package io.github.laurent67370.amiga1200
+
+import android.app.Activity
+import android.content.Context
+import android.content.Intent
+import android.graphics.Color
+import android.net.Uri
+import android.os.Build
+import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
+import android.os.Process
+import android.text.InputType
+import android.view.Gravity
+import android.view.InputDevice
+import android.view.KeyEvent
+import android.view.MotionEvent
+import android.view.SurfaceHolder
+import android.view.SurfaceView
+import android.view.View
+import android.view.ViewGroup
+import android.view.WindowInsets
+import android.view.WindowInsetsController
+import android.view.WindowManager
+import android.view.inputmethod.BaseInputConnection
+import android.view.inputmethod.EditorInfo
+import android.view.inputmethod.InputConnection
+import android.view.inputmethod.InputMethodManager
+import android.widget.FrameLayout
+import android.widget.PopupMenu
+import android.widget.TextView
+import android.widget.Toast
+import java.io.File
+import java.util.Locale
+import kotlin.math.abs
+
+/** L'Amiga en plein écran. Tourne dans le processus « :emu » : quitter arrête ce processus (le cœur garde un état
+ *  global), l'écran des réglages reste ouvert. */
+class EmuActivity : Activity(), SurfaceHolder.Callback {
+    private lateinit var s: Settings
+    private lateinit var root: FrameLayout
+    private lateinit var screen: SurfaceView
+    private lateinit var info: TextView
+    private lateinit var keys: KeyCatcher
+    private var pad: TouchPad? = null
+    private val ui = Handler(Looper.getMainLooper())
+    private var running = false
+    private var paused = false
+    private var turbo = false
+    private var padKeys = 0
+    private var padAxes = 0
+
+    override fun onCreate(state: Bundle?) {
+        super.onCreate(state)
+        s = Settings(this)
+        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+
+        root = object : FrameLayout(this) {
+            // Image en 4:3 centrée, ou étirée sur tout l'écran (« Pleine largeur »)
+            override fun onLayout(changed: Boolean, l: Int, t: Int, r: Int, b: Int) {
+                super.onLayout(changed, l, t, r, b)
+                val w = r - l; val h = b - t
+                var sw = w; var sh = h
+                if (!s.fill) { if (w * 3 > h * 4) sw = h * 4 / 3 else sh = w * 3 / 4 }
+                val x = (w - sw) / 2; val y = (h - sh) / 2
+                screen.layout(x, y, x + sw, y + sh)
+            }
+        }
+        root.setBackgroundColor(Color.BLACK)
+        screen = SurfaceView(this)
+        screen.holder.addCallback(this)
+        root.addView(screen)
+
+        keys = KeyCatcher(this)
+        root.addView(keys, FrameLayout.LayoutParams(1, 1))
+
+        info = TextView(this).apply {
+            setTextColor(Color.WHITE); setShadowLayer(3f, 0f, 0f, Color.BLACK); textSize = 13f
+            setPadding(dp(8), dp(4), dp(8), dp(4)); text = "Démarrage…"
+        }
+        root.addView(info, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.TOP or Gravity.START))
+
+        val menuBtn = TextView(this).apply {
+            text = "☰"; textSize = 22f; setTextColor(Color.WHITE); alpha = 0.55f
+            setPadding(dp(14), dp(6), dp(14), dp(6))
+            setOnClickListener { menu(this) }
+        }
+        root.addView(menuBtn, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.TOP or Gravity.END))
+        root.tag = menuBtn
+
+        root.setOnTouchListener(mouse)
+        setTouchPad(s.touchPad)
+        setContentView(root)
+        immersive()
+        boot()
+    }
+
+    // ---------- démarrage ----------
+    private fun boot() {
+        val df0 = Disks.link(this, s.df0, s.df0Name)
+        val dh0 = Disks.link(this, s.dh0, s.dh0Name)
+        if (s.df0.isNotEmpty() && df0 == null) toast("Disquette ${s.df0Name} : accès refusé, choisissez-la à nouveau")
+        if (s.dh0.isNotEmpty() && dh0 == null) toast("Disque dur ${s.dh0Name} : accès refusé, choisissez-le à nouveau")
+        val cfg = Config.write(this, s, df0, dh0)
+        Native.setDirs(Config.sysDir(this).path, Config.saveDir(this).path)
+        // Options du cœur : celles de la version web (cadrage automatique, pas de barre d'état, manette 0 au port joystick)
+        Native.setOption("amiberry_crop_overscan", "enabled")
+        Native.setOption("amiberry_statusline", "disabled")
+        Native.setOption("amiberry_joyport_order", "21")
+        if (!Native.start(cfg.path)) { fail("le fil de l'émulation n'a pas pu démarrer"); return }
+        val t0 = System.currentTimeMillis()
+        ui.post(object : Runnable {
+            override fun run() {
+                when (Native.state()) {
+                    2 -> { running = true; Native.frames(); Native.busyUs(); ui.postDelayed(stats, 1000) }
+                    1 -> if (System.currentTimeMillis() - t0 < 30000) ui.postDelayed(this, 50) else fail("le cœur ne répond pas")
+                    else -> fail("le cœur a refusé la configuration (Kickstart ou disque illisible ?)")
+                }
+            }
+        })
+    }
+
+    private fun fail(why: String) {
+        toast("Démarrage impossible : $why")
+        quit()
+    }
+
+    /** Vitesse (images par seconde, pourcentage du temps réel) et charge (temps de calcul d'une image) */
+    private val stats = object : Runnable {
+        override fun run() {
+            if (!running) return
+            val n = Native.frames()
+            val busy = Native.busyUs()
+            val fps = Native.fps().takeIf { it > 0 } ?: 50.0
+            if (s.showSpeed) {
+                info.text = when {
+                    paused -> "En pause"
+                    turbo -> String.format(Locale.FRANCE, "Turbo : %d images/s (%.1f× le temps réel)%s", n, n / fps, if (s.jit && s.model == "A1200") " · JIT" else "")
+                    else -> String.format(Locale.FRANCE, "%d images/s · %d %% · calcul %.1f ms/image%s", n, (n * 100 / fps).toInt(),
+                        if (n > 0) busy / n / 1000.0 else 0.0, if (s.jit && s.model == "A1200") " · JIT" else "")
+                }
+            } else info.text = if (paused) "En pause" else ""
+            ui.postDelayed(this, 1000)
+        }
+    }
+
+    // ---------- affichage ----------
+    override fun surfaceCreated(holder: SurfaceHolder) = Native.setSurface(holder.surface)
+    override fun surfaceChanged(holder: SurfaceHolder, format: Int, w: Int, h: Int) = Native.setSurface(holder.surface)
+    override fun surfaceDestroyed(holder: SurfaceHolder) = Native.setSurface(null)
+
+    private fun immersive() {
+        if (Build.VERSION.SDK_INT >= 30) {
+            window.insetsController?.let {
+                it.hide(WindowInsets.Type.systemBars())
+                it.systemBarsBehavior = WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+            }
+        } else {
+            @Suppress("DEPRECATION")
+            window.decorView.systemUiVisibility = (View.SYSTEM_UI_FLAG_FULLSCREEN or View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
+                or View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY or View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+                or View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION or View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN)
+        }
+    }
+
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        if (hasFocus) immersive()
+    }
+
+    override fun onPause() {
+        super.onPause()
+        Native.pause(true)
+    }
+
+    override fun onResume() {
+        super.onResume()
+        if (!paused) Native.pause(false)
+    }
+
+    // ---------- menu ----------
+    private fun menu(anchor: View) {
+        val m = PopupMenu(this, anchor)
+        m.menu.add(0, 1, 0, if (paused) "Reprendre" else "Pause")
+        m.menu.add(0, 2, 0, if (turbo) "Vitesse normale" else "Turbo (mesure de vitesse)")
+        m.menu.add(0, 3, 0, "Clavier")
+        m.menu.add(0, 4, 0, if (s.touchPad) "Écran tactile : souris" else "Écran tactile : manette")
+        m.menu.add(0, 5, 0, "Changer de disquette DF0:")
+        m.menu.add(0, 6, 0, "Sauvegarder l'état")
+        m.menu.add(0, 7, 0, "Reprendre l'état sauvegardé")
+        m.menu.add(0, 8, 0, if (s.fill) "Image en 4:3" else "Pleine largeur")
+        m.menu.add(0, 9, 0, if (s.showSpeed) "Masquer la vitesse" else "Afficher la vitesse")
+        m.menu.add(0, 10, 0, "Réinitialiser l'Amiga")
+        m.menu.add(0, 11, 0, "Éteindre")
+        m.setOnMenuItemClickListener {
+            when (it.itemId) {
+                1 -> { paused = !paused; Native.pause(paused) }
+                2 -> { turbo = !turbo; Native.warp(if (turbo) 8 else 1) }
+                3 -> keys.show()
+                4 -> { s.touchPad = !s.touchPad; setTouchPad(s.touchPad) }
+                5 -> pickDisk()
+                6 -> toast(if (Native.saveState(statePath())) "État sauvegardé" else "Sauvegarde impossible")
+                7 -> toast(if (File(statePath()).exists() && Native.loadState(statePath())) "État repris" else "Aucun état à reprendre")
+                8 -> { s.fill = !s.fill; root.requestLayout() }
+                9 -> { s.showSpeed = !s.showSpeed }
+                10 -> Native.reset()
+                11 -> quit()
+            }
+            true
+        }
+        m.show()
+    }
+
+    private fun statePath() = File(Config.saveDir(this), "etat-${s.model}.uss").path
+
+    private fun pickDisk() {
+        startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE); type = "*/*"
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION or Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION)
+        }, 1)
+    }
+
+    @Deprecated("API Activity simple, sans AndroidX")
+    override fun onActivityResult(req: Int, res: Int, data: Intent?) {
+        super.onActivityResult(req, res, data)
+        val uri: Uri = data?.data ?: return
+        if (res != RESULT_OK) return
+        try { contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION) }
+        catch (_: Exception) { try { contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION) } catch (_: Exception) {} }
+        val name = Disks.displayName(this, uri)
+        val path = Disks.link(this, uri.toString(), name)
+        if (path == null) { toast("Lecture de $name impossible"); return }
+        s.df0 = uri.toString(); s.df0Name = name
+        Native.insertDisk(0, path)
+        toast("DF0: $name")
+    }
+
+    private fun quit() {
+        running = false
+        Native.stop()
+        finish()
+        // Le cœur ne se rallume pas dans le même processus : on le termine (après l'écriture des disques)
+        ui.postDelayed({ Process.killProcess(Process.myPid()) }, 300)
+    }
+
+    // ---------- souris tactile ----------
+    private val mouse = object : View.OnTouchListener {
+        var lastX = 0f; var lastY = 0f; var startX = 0f; var startY = 0f; var accX = 0f; var accY = 0f
+        var downAt = 0L; var moved = false; var drag = false; var twoFingers = false
+        val longPress = Runnable { if (!moved && !twoFingers) { drag = true; Native.mouseButtons(1) } }
+
+        override fun onTouch(v: View, e: MotionEvent): Boolean {
+            // Déplacement en pixels de l'Amiga : le pointeur suit le doigt à la même vitesse sur l'image
+            val scale = if (screen.width > 0 && Native.videoW() > 0) Native.videoW().toFloat() / screen.width else 1f
+            when (e.actionMasked) {
+                MotionEvent.ACTION_DOWN -> {
+                    lastX = e.x; lastY = e.y; startX = e.x; startY = e.y; accX = 0f; accY = 0f
+                    downAt = e.eventTime; moved = false; drag = false; twoFingers = false
+                    ui.postDelayed(longPress, 400)
+                }
+                MotionEvent.ACTION_POINTER_DOWN -> { twoFingers = true; ui.removeCallbacks(longPress) }
+                MotionEvent.ACTION_MOVE -> if (!twoFingers) {
+                    if (!moved && abs(e.x - startX) + abs(e.y - startY) > dp(10)) moved = true
+                    accX += (e.x - lastX) * scale; accY += (e.y - lastY) * scale
+                    lastX = e.x; lastY = e.y
+                    val dx = accX.toInt(); val dy = accY.toInt()
+                    if (dx != 0 || dy != 0) { Native.mouseMove(dx, dy); accX -= dx; accY -= dy }
+                }
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                    ui.removeCallbacks(longPress)
+                    when {
+                        drag -> Native.mouseButtons(0)
+                        twoFingers -> click(2)
+                        !moved && e.eventTime - downAt < 300 -> click(1)
+                    }
+                }
+            }
+            return true
+        }
+    }
+
+    private fun click(button: Int) {
+        Native.mouseButtons(button)
+        ui.postDelayed({ Native.mouseButtons(0) }, 60)
+    }
+
+    private fun setTouchPad(on: Boolean) {
+        pad?.let { root.removeView(it) }
+        pad = null
+        if (on) {
+            pad = TouchPad(this).also {
+                root.addView(it, 2, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+            }
+        }
+        Native.joy(0, padKeys or padAxes)
+    }
+
+    // ---------- clavier et manettes ----------
+    override fun dispatchKeyEvent(e: KeyEvent): Boolean {
+        val down = e.action == KeyEvent.ACTION_DOWN
+        if (e.keyCode == KeyEvent.KEYCODE_BACK) {
+            if (!down) menu(root.tag as View)
+            return true
+        }
+        if (e.keyCode == KeyEvent.KEYCODE_VOLUME_UP || e.keyCode == KeyEvent.KEYCODE_VOLUME_DOWN || e.keyCode == KeyEvent.KEYCODE_VOLUME_MUTE)
+            return super.dispatchKeyEvent(e)
+        val fromPad = e.isFromSource(InputDevice.SOURCE_GAMEPAD) || e.isFromSource(InputDevice.SOURCE_JOYSTICK)
+        val bit = if (fromPad || KeyEvent.isGamepadButton(e.keyCode)) Keymap.padBit(e.keyCode) else 0
+        if (bit != 0) {
+            if (e.repeatCount == 0) {
+                padKeys = if (down) padKeys or bit else padKeys and bit.inv()
+                Native.joy(0, padKeys or padAxes)
+            }
+            return true
+        }
+        val k = Keymap.retrok(e.keyCode)
+        if (k != 0) {
+            if (e.repeatCount == 0) Native.key(down, k)
+            return true
+        }
+        return super.dispatchKeyEvent(e)
+    }
+
+    override fun onGenericMotionEvent(e: MotionEvent): Boolean {
+        if (e.isFromSource(InputDevice.SOURCE_JOYSTICK) && e.actionMasked == MotionEvent.ACTION_MOVE) {
+            val x = e.getAxisValue(MotionEvent.AXIS_X) + e.getAxisValue(MotionEvent.AXIS_HAT_X)
+            val y = e.getAxisValue(MotionEvent.AXIS_Y) + e.getAxisValue(MotionEvent.AXIS_HAT_Y)
+            var m = 0
+            if (y < -0.5f) m = m or (1 shl 4)
+            if (y > 0.5f) m = m or (1 shl 5)
+            if (x < -0.5f) m = m or (1 shl 6)
+            if (x > 0.5f) m = m or (1 shl 7)
+            if (m != padAxes) { padAxes = m; Native.joy(0, padKeys or padAxes) }
+            return true
+        }
+        return super.onGenericMotionEvent(e)
+    }
+
+    /** Joystick tactile : touché par TouchPad */
+    fun touchJoy(mask: Int) {
+        padAxes = mask
+        Native.joy(0, padKeys or padAxes)
+    }
+
+    private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
+    private fun toast(t: String) = Toast.makeText(this, t, Toast.LENGTH_LONG).show()
+}
+
+/** Vue invisible qui reçoit le clavier virtuel : touches spéciales en événements, lettres en texte */
+class KeyCatcher(ctx: Context) : View(ctx) {
+    init { isFocusable = true; isFocusableInTouchMode = true }
+
+    fun show() {
+        requestFocus()
+        (context.getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager).showSoftInput(this, 0)
+    }
+
+    override fun onCheckIsTextEditor() = true
+
+    override fun onCreateInputConnection(out: EditorInfo): InputConnection {
+        out.inputType = InputType.TYPE_NULL
+        out.imeOptions = EditorInfo.IME_FLAG_NO_FULLSCREEN or EditorInfo.IME_FLAG_NO_EXTRACT_UI
+        return object : BaseInputConnection(this, false) {
+            override fun commitText(text: CharSequence, pos: Int): Boolean {
+                for (c in text) {
+                    val (k, shift) = Keymap.forChar(c) ?: continue
+                    if (shift) Native.key(true, 304)
+                    Native.key(true, k); Native.key(false, k)
+                    if (shift) Native.key(false, 304)
+                }
+                return true
+            }
+            override fun deleteSurroundingText(before: Int, after: Int): Boolean {
+                repeat(maxOf(before, 1)) { Native.key(true, 8); Native.key(false, 8) }
+                return true
+            }
+        }
+    }
+}
