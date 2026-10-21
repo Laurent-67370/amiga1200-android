@@ -1,0 +1,67 @@
+name: APK Android
+
+on:
+  push:
+    branches: [main, "claude/**"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      # Objets du cœur Amiberry gardés d'une compilation à l'autre (build-core.sh jette ceux d'anciens correctifs)
+      - uses: actions/cache@v4
+        with:
+          path: native/src
+          key: amiberry-android-${{ hashFiles('native/build-core.sh', 'native/patches/*.patch') }}-${{ github.sha }}
+          restore-keys: amiberry-android-${{ hashFiles('native/build-core.sh', 'native/patches/*.patch') }}-
+
+      - name: Cœur Amiberry ARM64 avec JIT (NDK)
+        run: ANDROID_NDK_ROOT="$ANDROID_NDK_LATEST_HOME" native/build-core.sh
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.14.3"
+
+      - name: APK
+        run: gradle --no-daemon assembleRelease
+
+      - name: Nom de l'APK
+        run: cp app/build/outputs/apk/release/app-release.apk amiga1200-android.apk
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: amiga1200-android-apk
+          path: amiga1200-android.apk
+
+      - name: Journal de compilation du cœur
+        if: failure()
+        run: tail -200 native/out/make.log || true
+
+      # Version de test téléchargeable directement depuis le téléphone (page Releases du dépôt)
+      - name: Publication « dev »
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: dev
+          name: Version de test (compilation ${{ github.run_number }})
+          prerelease: true
+          make_latest: false
+          body: |
+            APK de test construit automatiquement depuis main (${{ github.sha }}).
+            Installation : télécharger amiga1200-android.apk sur le téléphone, l'ouvrir et autoriser l'installation.
+          files: amiga1200-android.apk
