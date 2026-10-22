@@ -160,9 +160,14 @@ class MainActivity : Activity() {
         }
         setContentView(root)
         refresh()
-        if (intent?.getBooleanExtra(EXTRA_RESTART, false) == true) window.decorView.postDelayed({
-            power(intent.getStringExtra(EmuActivity.EXTRA_WHD_URI), intent.getStringExtra(EmuActivity.EXTRA_WHD_NAME))
-        }, 1200)
+        // Rallumage demandé une seule fois : quand Android recrée l'accueil (retour d'une extinction, mémoire libérée),
+        // il lui rend la même demande, qui ne doit pas rallumer l'Amiga de nouveau
+        if (state == null && intent?.getBooleanExtra(EXTRA_RESTART, false) == true) {
+            val uri = intent.getStringExtra(EmuActivity.EXTRA_WHD_URI)
+            val name = intent.getStringExtra(EmuActivity.EXTRA_WHD_NAME)
+            intent.removeExtra(EXTRA_RESTART)
+            window.decorView.postDelayed({ power(uri, name) }, 1200)
+        }
         else if (!getSharedPreferences("aide", MODE_PRIVATE).getBoolean("vue", false)) {
             getSharedPreferences("aide", MODE_PRIVATE).edit().putBoolean("vue", true).apply()
             window.decorView.post { help() }
