@@ -56,6 +56,12 @@ les réglages.
   l'écran, tir 1 et 2 échangés, bouton B = haut (sauter). **Deux manettes** : la seconde joue sur le port souris.
 - **Rapport de plantage** : si l'émulation s'arrête brutalement, l'écran des réglages propose de partager un rapport
   (pile d'appels du cœur et fin du journal).
+- **Quitter un jeu d'un geste** (bouton ⏏) : touche de sortie de WHDLoad, F10 par défaut ; un appui long choisit `*` du
+  pavé numérique (Impr. écran sous WinUAE) ou Échap.
+- **Touches sur la manette** : X, Y, Start, Select, L1/R1, L2/R2, L3/R3 deviennent des touches du clavier (Espace, Return,
+  F1…), réglées pour chaque jeu (menu → Commandes → Touches de la manette).
+- **Raccourcis de jeux** : un appui long dans la Bibliothèque pose sur l'écran d'accueil d'Android une icône qui lance le
+  jeu WHDLoad, la disquette ou le CD directement.
 - **Bruit des lecteurs de disquettes** (clic de la tête, rotation, insertion), comme sur un vrai Amiga : accueil
   → Son et MIDI, ou menu → Avancé en cours de partie.
 - **MIDI** sur le port série de l'Amiga (Bars & Pipes, Music-X, OctaMED, jeux qui parlent MIDI) : l'Amiga joue sur un

@@ -73,7 +73,7 @@ class MainActivity : Activity() {
             libList = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(0, dp(6), 0, 0) }
             c.addView(libList)
             c.addView(row(button("Ajouter des fichiers…") { pick(REQ_LIB, multiple = true) }))
-            c.addView(note("Jeux WHDLoad (.lha) lancés d'un toucher, disquettes et disques durs retrouvés sans les rechercher. Appui long : retirer de la bibliothèque (le fichier n'est pas effacé)."))
+            c.addView(note("Jeux WHDLoad (.lha) lancés d'un toucher, disquettes et disques durs retrouvés sans les rechercher. Appui long : raccourci sur l'écran d'accueil d'Android, ou retrait (le fichier n'est pas effacé)."))
         }
 
         // Kickstart
@@ -174,7 +174,8 @@ class MainActivity : Activity() {
         refresh()
         // Rallumage demandé une seule fois : quand Android recrée l'accueil (retour d'une extinction, mémoire libérée),
         // il lui rend la même demande, qui ne doit pas rallumer l'Amiga de nouveau
-        if (state == null && intent?.getBooleanExtra(EXTRA_RESTART, false) == true) {
+        if (state == null && intent?.action == ACTION_PLAY) { playFromShortcut(intent); intent.action = null }
+        else if (state == null && intent?.getBooleanExtra(EXTRA_RESTART, false) == true) {
             val uri = intent.getStringExtra(EmuActivity.EXTRA_WHD_URI)
             val name = intent.getStringExtra(EmuActivity.EXTRA_WHD_NAME)
             intent.removeExtra(EXTRA_RESTART)
@@ -284,18 +285,62 @@ class MainActivity : Activity() {
                     Library.CD -> addView(chip("▶ CD32") { playCd(it) })
                     else -> addView(chip(if (s.hds.any { h -> h.uri == it.uri }) "✓ branché" else "+ Brancher") { useHdf(it) })
                 }
-                setOnLongClickListener { _ ->
-                    AlertDialog.Builder(this@MainActivity).setTitle(it.name).setMessage("Retirer de la bibliothèque ? Le fichier lui-même n'est pas effacé.")
-                        .setPositiveButton("Retirer") { _, _ -> Library.remove(this@MainActivity, it.uri); refreshLibrary() }
-                        .setNegativeButton("Annuler", null).show()
-                    true
-                }
+                setOnLongClickListener { _ -> libItemMenu(it); true }
             })
         }
         if (!libAll && shown.size > 8) libList.addView(chip("Tout afficher (${shown.size})") { libAll = true; refreshLibrary() })
     }
 
     /** Jeu WHDLoad : il faut un vrai Kickstart (avec AROS, WHDLoad s'arrête) */
+    /** Appui long sur un élément de la Bibliothèque : raccourci sur l'écran d'accueil d'Android, ou retrait */
+    private fun libItemMenu(it: LibItem) {
+        val canPin = it.kind != Library.HDF
+        val items = (if (canPin) listOf("📌 Raccourci sur l'écran d'accueil") else emptyList()) + "Retirer de la bibliothèque"
+        AlertDialog.Builder(this).setTitle(it.name.substringBeforeLast('.'))
+            .setItems(items.toTypedArray()) { _, i ->
+                if (canPin && i == 0) pinShortcut(it)
+                else AlertDialog.Builder(this).setTitle(it.name).setMessage("Retirer de la bibliothèque ? Le fichier lui-même n'est pas effacé.")
+                    .setPositiveButton("Retirer") { _, _ -> Library.remove(this, it.uri); refreshLibrary() }
+                    .setNegativeButton("Annuler", null).show()
+            }.setNegativeButton("Annuler", null).show()
+    }
+
+    /** Icône qui lance le jeu (WHDLoad), la disquette (machine actuelle) ou le CD (CD32) d'un toucher */
+    private fun pinShortcut(it: LibItem) {
+        val sm = getSystemService(android.content.pm.ShortcutManager::class.java)
+        if (sm == null || !sm.isRequestPinShortcutSupported) { toast("Ce lanceur n'accepte pas les raccourcis"); return }
+        val launch = Intent(this, MainActivity::class.java).setAction(ACTION_PLAY)
+            .putExtra(EXTRA_PLAY_URI, it.uri).putExtra(EXTRA_PLAY_NAME, it.name).putExtra(EXTRA_PLAY_KIND, it.kind)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
+        val label = it.name.substringBeforeLast('.')
+        val info = android.content.pm.ShortcutInfo.Builder(this, "jeu:" + it.uri.hashCode())
+            .setShortLabel(label.take(24)).setLongLabel(label)
+            .setIcon(android.graphics.drawable.Icon.createWithResource(this, R.mipmap.ic_launcher))
+            .setIntent(launch).build()
+        try { sm.requestPinShortcut(info, null) } catch (e: Exception) { toast("Raccourci impossible : ${e.message}") }
+    }
+
+    /** Lancement depuis un raccourci : attend la fin d'une émulation en cours (son processus ne se rallume pas) */
+    private fun playFromShortcut(i: Intent) {
+        val uri = i.getStringExtra(EXTRA_PLAY_URI) ?: return
+        val item = Library.all(this).firstOrNull { it.uri == uri }
+            ?: LibItem(uri, i.getStringExtra(EXTRA_PLAY_NAME) ?: "jeu", i.getStringExtra(EXTRA_PLAY_KIND) ?: Library.WHD, 0, 0)
+        val am = getSystemService(android.app.ActivityManager::class.java)
+        val t0 = System.currentTimeMillis()
+        val view = window.decorView
+        view.post(object : Runnable {
+            override fun run() {
+                val busy = am?.runningAppProcesses?.any { it.processName == "$packageName:emu" } == true
+                if (busy && System.currentTimeMillis() - t0 < 4000) { view.postDelayed(this, 150); return }
+                when (item.kind) {
+                    Library.WHD -> playWhd(item)
+                    Library.CD -> playCd(item)
+                    Library.FLOPPY -> { useFloppy(item); power() }
+                }
+            }
+        })
+    }
+
     private fun playWhd(it: LibItem) {
         if (!userRom()) {
             AlertDialog.Builder(this).setTitle("Kickstart nécessaire")
@@ -503,6 +548,7 @@ class MainActivity : Activity() {
     /** Redémarrage demandé par l'émulation (« Réinitialiser ») : rallumage une fois son ancien processus terminé */
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
+        if (intent.action == ACTION_PLAY) { playFromShortcut(intent); return }
         if (intent.getBooleanExtra(EXTRA_RESTART, false)) window.decorView.postDelayed({
             power(intent.getStringExtra(EmuActivity.EXTRA_WHD_URI), intent.getStringExtra(EmuActivity.EXTRA_WHD_NAME))
         }, 1200)
@@ -569,6 +615,10 @@ class MainActivity : Activity() {
         const val REQ_UAE = 8
         const val REQ_UAE_OUT = 9
         const val EXTRA_RESTART = "rallumer"
+        const val ACTION_PLAY = "io.github.laurent67370.amiga1200.JOUER"
+        const val EXTRA_PLAY_URI = "lien"
+        const val EXTRA_PLAY_NAME = "nom"
+        const val EXTRA_PLAY_KIND = "type"
         private val ACCENT = Color.rgb(230, 92, 30)
         private val BG = Color.rgb(20, 22, 28)
         private val CARD = Color.rgb(34, 37, 46)
