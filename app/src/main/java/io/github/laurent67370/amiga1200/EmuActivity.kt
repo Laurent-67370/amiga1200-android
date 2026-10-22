@@ -68,6 +68,9 @@ class EmuActivity : Activity(), SurfaceHolder.Callback {
     private var mbGesture = 0
     private var mbKeys = 0
     private var mouseKeysView: View? = null
+    /** Boutons de manette changés en touches du clavier, pour ce jeu */
+    private var padKeyMap: Map<Int, Int> = emptyMap()
+    private var quitting = false
 
     override fun onCreate(state: Bundle?) {
         super.onCreate(state)
@@ -117,6 +120,8 @@ class EmuActivity : Activity(), SurfaceHolder.Callback {
             addView(pauseBtn)
             addView(barButton("⤓") { saveSlot(0) })
             addView(barButton("⤒") { loadSlot(0) })
+            // Quitter le jeu ou la démo (touche de sortie de WHDLoad) ; appui long : choisir la touche
+            addView(barButton("⏏") { quitGame() }.apply { setOnLongClickListener { chooseQuitKey(); true } })
             addView(menuBtn)
         }
         root.addView(bar, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.TOP or Gravity.END))
@@ -147,6 +152,7 @@ class EmuActivity : Activity(), SurfaceHolder.Callback {
             Disks.link(this, uri, Disks.safe(whdName)) ?: run { fail("le jeu $whdName est illisible, choisissez-le à nouveau"); return }
         } ?: machineConfig()
         Native.setDirs(Config.sysDir(this).path, Config.saveDir(this).path)
+        padKeyMap = PadKeys.load(this, gameKey())
         // Bruits des lecteurs : le cœur cherche data/floppy_sounds sous son dossier courant
         FloppySounds.ensure(this)
         Native.setHome(filesDir.path)
@@ -272,6 +278,8 @@ class EmuActivity : Activity(), SurfaceHolder.Callback {
             add(0, 14, 0, if (s.azerty) "Lettres en QWERTY" else "Lettres en AZERTY")
             add(0, 13, 0, "Clavier du téléphone")
             add(0, 16, 0, "Réglages des commandes…")
+            add(0, 19, 0, "Touches de la manette (ce jeu)…")
+            add(0, 20, 0, "Touche pour quitter les jeux (⏏)…")
         }
         mm.addSubMenu(0, 101, 0, "🖥  Écran").apply {
             add(0, 8, 0, if (s.fill) "Image en 4:3" else "Image sur toute la largeur")
@@ -304,6 +312,8 @@ class EmuActivity : Activity(), SurfaceHolder.Callback {
                 15 -> help()
                 18 -> { s.floppySound = !s.floppySound; Native.floppySound(s.floppySound) }
                 16 -> ControlsDialog.show(this, s) { applyControls() }
+                19 -> PadKeys.dialog(this, gameKey(), gameTitle()) { padKeyMap = it }
+                20 -> chooseQuitKey()
                 17 -> {
                     s.jit = !s.jit  // retenu pour ce disque de démarrage
                     toastShort(if (s.jit) "Redémarrage avec le JIT" else "Redémarrage sans JIT : 68020 d'origine")
@@ -340,6 +350,7 @@ class EmuActivity : Activity(), SurfaceHolder.Callback {
                 🖱 / 🕹  souris tactile ou manette tactile
                 ⏸  pause
                 ⤓ / ⤒  sauvegarde et reprise rapides (emplacement 1)
+                ⏏  quitter le jeu ou la démo (touche de sortie de WHDLoad : F10 ; appui long pour choisir * ou Échap)
                 ☰  menu complet (ou bouton Retour, ou F12)
 
                 Souris tactile : glisser pour déplacer le pointeur, toucher pour cliquer, toucher à deux doigts pour le clic droit, appui long puis glisser pour déplacer une fenêtre.
@@ -492,7 +503,30 @@ class EmuActivity : Activity(), SurfaceHolder.Callback {
         toast(if (ok) "Reprise où vous en étiez" else "Reprise impossible : l'Amiga redémarre normalement")
     }
 
+    /** Jeu en cours, pour les réglages qui lui sont propres : l'archive WHDLoad, sinon le disque de démarrage */
+    private fun gameKey() = whdUri?.let { "whd:$whdName" } ?: "disque:${s.bootKey()}"
+    private fun gameTitle() = (if (whdUri != null) whdName else s.bootKey().ifEmpty { "Amiga" }).substringBeforeLast('.')
+
+    private val quitKeys = listOf(291 to "F10", 268 to "* du pavé numérique (Impr. écran sur PC)", 27 to "Échap")
+    private fun quitGame() {
+        val k = s.quitKey
+        Native.key(true, k); Native.key(false, k)
+        toastShort("Touche ${quitKeys.firstOrNull { it.first == k }?.second?.substringBefore(" (") ?: "?"} (appui long sur ⏏ pour changer)")
+    }
+    private fun chooseQuitKey() {
+        android.app.AlertDialog.Builder(this).setTitle("Touche pour quitter les jeux (⏏)")
+            .setItems(quitKeys.map { (k, n) -> (if (k == s.quitKey) "✓ " else "") + n }.toTypedArray()) { _, i -> s.quitKey = quitKeys[i].first; quitGame() }
+            .setNegativeButton("Annuler", null).show()
+    }
+
+    /** Fermée par Android ou remplacée par un raccourci de jeu : le cœur ne se rallume pas dans ce processus */
+    override fun onDestroy() {
+        super.onDestroy()
+        if (!quitting) { midi?.stop(); Native.stop(); Process.killProcess(Process.myPid()) }
+    }
+
     private fun quit() {
+        quitting = true
         running = false
         midi?.stop()
         Native.stop()
@@ -613,6 +647,11 @@ class EmuActivity : Activity(), SurfaceHolder.Callback {
         if (e.keyCode == KeyEvent.KEYCODE_VOLUME_UP || e.keyCode == KeyEvent.KEYCODE_VOLUME_DOWN || e.keyCode == KeyEvent.KEYCODE_VOLUME_MUTE)
             return super.dispatchKeyEvent(e)
         val fromPad = e.isFromSource(InputDevice.SOURCE_GAMEPAD) || e.isFromSource(InputDevice.SOURCE_JOYSTICK)
+        // Bouton changé en touche du clavier pour ce jeu
+        if (fromPad || KeyEvent.isGamepadButton(e.keyCode)) padKeyMap[e.keyCode]?.let { k ->
+            if (e.repeatCount == 0) Native.key(down, k)
+            return true
+        }
         val bit = if (fromPad || KeyEvent.isGamepadButton(e.keyCode)) padBit(e.keyCode) else 0
         if (bit != 0) {
             if (e.repeatCount == 0) {

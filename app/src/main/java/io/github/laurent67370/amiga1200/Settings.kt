@@ -89,6 +89,8 @@ class Settings(ctx: Context) {
     var mouseKeys: Boolean get() = p.getBoolean("mouseKeys", false); set(v) = flag("mouseKeys", v)
     /** Manette : tir 1 et tir 2 échangés */
     var swapFire: Boolean get() = p.getBoolean("swapFire", false); set(v) = flag("swapFire", v)
+    /** Touche de sortie des jeux WHDLoad (bouton ⏏) : F10, * du pavé ou Échap */
+    var quitKey: Int get() = p.getInt("quitKey", 291); set(v) { p.edit().putInt("quitKey", v).commit() }
     /** Manette : bouton B = haut (sauter dans les jeux de plate-forme) */
     var jumpB: Boolean get() = p.getBoolean("jumpB", false); set(v) = flag("jumpB", v)
 
