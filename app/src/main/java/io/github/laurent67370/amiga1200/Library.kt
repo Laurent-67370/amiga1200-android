@@ -13,10 +13,12 @@ object Library {
     const val WHD = "whd"
     const val FLOPPY = "floppy"
     const val HDF = "hdf"
+    const val CD = "cd"
 
     fun kindOf(name: String): String = when (name.substringAfterLast('.', "").lowercase()) {
         "lha", "lzh" -> WHD
         "hdf", "hdz", "vhd" -> HDF
+        "iso", "chd", "cue", "ccd", "nrg", "mds" -> CD
         else -> FLOPPY
     }
 
