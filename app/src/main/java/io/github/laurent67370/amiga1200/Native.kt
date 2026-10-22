@@ -27,6 +27,8 @@ object Native {
     /** bits RETRO_DEVICE_ID_JOYPAD_* */
     external fun joy(port: Int, mask: Int)
     external fun key(down: Boolean, retrok: Int)
+    /** Type de manette d'un port libretro (513 : manette CD32 d'Amiberry) */
+    external fun portDevice(port: Int, device: Int)
 
     /** Chemin vide : éjecte */
     external fun insertDisk(drive: Int, path: String)

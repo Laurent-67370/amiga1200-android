@@ -31,6 +31,18 @@ class Settings(ctx: Context) {
     var df0: String get() = str("df0", ""); set(v) = put("df0", v)
     var df0Name: String get() = str("df0Name", ""); set(v) = put("df0Name", v)
     var df1: String get() = str("df1", ""); set(v) = put("df1", v)
+    var df2: String get() = str("df2", ""); set(v) = put("df2", v)
+    var df2Name: String get() = str("df2Name", ""); set(v) = put("df2Name", v)
+    var df3: String get() = str("df3", ""); set(v) = put("df3", v)
+    var df3Name: String get() = str("df3Name", ""); set(v) = put("df3Name", v)
+    /** CD de la CD32 (image .iso ou .chd, un seul fichier) */
+    var cd: String get() = str("cd", ""); set(v) = put("cd", v)
+    var cdName: String get() = str("cdName", ""); set(v) = put("cdName", v)
+    /** Lecteur DFn: : adresse et nom */
+    fun floppy(n: Int): Pair<String, String> = when (n) { 0 -> df0 to df0Name; 1 -> df1 to df1Name; 2 -> df2 to df2Name; else -> df3 to df3Name }
+    fun setFloppy(n: Int, uri: String, name: String) {
+        when (n) { 0 -> { df0 = uri; df0Name = name }; 1 -> { df1 = uri; df1Name = name }; 2 -> { df2 = uri; df2Name = name }; else -> { df3 = uri; df3Name = name } }
+    }
     var df1Name: String get() = str("df1Name", ""); set(v) = put("df1Name", v)
     /** Libellés du clavier Amiga à l'écran en AZERTY (clavier français de l'Amiga) */
     var azerty: Boolean get() = p.getBoolean("azerty", false); set(v) = flag("azerty", v)
@@ -72,7 +84,7 @@ class Settings(ctx: Context) {
 
     // ---------- réglages retenus par disque de démarrage ----------
     /** Disque qui démarre : la disquette DF0:, sinon le premier disque dur */
-    fun bootKey() = df0Name.ifEmpty { hds.firstOrNull()?.name ?: "" }
+    fun bootKey() = if (model == "CD32") cdName else df0Name.ifEmpty { hds.firstOrNull()?.name ?: "" }
     private fun saveProfile() {
         val k = bootKey()
         if (k.isNotEmpty()) p.edit().putString("profil:$k", "${str("model", "A1200")};${p.getBoolean("jit", true)};${p.getBoolean("rtg", true)}").commit()
@@ -85,9 +97,31 @@ class Settings(ctx: Context) {
         return true
     }
 
+    // ---------- configurations enregistrées ----------
+    /** Machine et disques, pour une configuration enregistrée sous un nom */
+    fun snapshot(): JSONObject {
+        val o = JSONObject().put("model", model).put("jit", jit).put("rtg", rtg).put("ntsc", ntsc).put("shared", shared)
+            .put("cd", cd).put("cdName", cdName)
+        for (n in 0..3) { val (u, nm) = floppy(n); o.put("df$n", u).put("df${n}Name", nm) }
+        val a = JSONArray(); for (h in hds) a.put(JSONObject().put("uri", h.uri).put("name", h.name))
+        return o.put("hds", a)
+    }
+    fun restore(o: JSONObject) {
+        p.edit().putString("model", o.optString("model", "A1200")).putBoolean("jit", o.optBoolean("jit", true))
+            .putBoolean("rtg", o.optBoolean("rtg", true)).putBoolean("ntsc", o.optBoolean("ntsc", false))
+            .putBoolean("shared", o.optBoolean("shared", true)).commit()
+        cd = o.optString("cd"); cdName = o.optString("cdName")
+        for (n in 0..3) setFloppy(n, o.optString("df$n"), o.optString("df${n}Name"))
+        val a = o.optJSONArray("hds") ?: JSONArray()
+        hds = (0 until a.length()).map { a.getJSONObject(it).let { h -> Hd(h.getString("uri"), h.getString("name")) } }
+    }
+    fun savedConfigs(): JSONObject = try { JSONObject(str("configs", "{}")) } catch (_: Exception) { JSONObject() }
+    fun saveConfig(name: String) = put("configs", savedConfigs().put(name, snapshot()).toString())
+    fun deleteConfig(name: String) = put("configs", savedConfigs().apply { remove(name) }.toString())
+
     // ---------- reprise où l'on en était ----------
     /** Signature de la configuration : la reprise n'est proposée qu'avec la même machine et les mêmes disques */
-    fun signature() = listOf(model, jit, rtg, ntsc, rom, romName, df0, df1, hds.joinToString("|") { it.uri }).joinToString("#")
+    fun signature() = listOf(model, jit, rtg, ntsc, rom, romName, df0, df1, df2, df3, cd, hds.joinToString("|") { it.uri }).joinToString("#")
     var resumeSig: String get() = str("resumeSig", ""); set(v) = put("resumeSig", v)
 }
 
@@ -156,43 +190,58 @@ object Config {
         return d
     }
 
-    fun write(ctx: Context, s: Settings, df0: String?, df1: String?, hds: List<String>, shared: File?): File {
+    /** Machines : A1200 et A4000 acceptent le JIT et la carte RTG ; la CD32 démarre sur son CD */
+    fun bigBox(model: String) = model == "A1200" || model == "A4000"
+
+    fun write(ctx: Context, s: Settings, floppies: List<String?>, hds: List<String>, shared: File?, cd: String?): File {
         val sys = sysDir(ctx)
-        val a500 = s.model == "A500"
-        val l = mutableListOf("quickstart=${s.model},0")
-        val kick = File(sys, "kick.rom")
-        if (s.rom == "user" && kick.exists()) l += "kickstart_rom_file=${kick.path}"
-        else {
-            aros(ctx)
-            l += "kickstart_rom_file=${File(sys, "aros-rom.bin").path}"
-            l += "kickstart_ext_rom_file=${File(sys, "aros-ext.bin").path}"
-            if (a500) l += "fastmem_size=2" // AROS ne tient pas dans la mémoire d'un A500
+        val model = s.model
+        val l = mutableListOf("quickstart=$model,0")
+        if (model == "CD32") {
+            // CD32 : la console telle qu'elle est, avec ses propres ROM (512 Ko + extension, ou ROM complète de 1 Mo)
+            l += "kickstart_rom_file=${File(sys, "cd32.rom").path}"
+            File(sys, "cd32ext.rom").takeIf { it.exists() }?.let { l += "kickstart_ext_rom_file=${it.path}" }
+            if (cd != null) l += "cdimage0=$cd,image"
+            l += listOf("ntsc=${s.ntsc}", "gfx_resolution=hires")
+        } else {
+            val kick = File(sys, "kick.rom")
+            if (s.rom == "user" && kick.exists()) l += "kickstart_rom_file=${kick.path}"
+            else {
+                aros(ctx)
+                l += "kickstart_rom_file=${File(sys, "aros-rom.bin").path}"
+                l += "kickstart_ext_rom_file=${File(sys, "aros-ext.bin").path}"
+                // AROS ne tient pas dans la mémoire d'un A500 ou d'un A600
+                if (model == "A500") l += "fastmem_size=2"
+                if (model == "A600") l += "fastmem_size=4"
+            }
+            // Quatre lecteurs si DF2: ou DF3: sont utilisés
+            val n = if (floppies.drop(2).any { it != null }) 4 else 2
+            l += "nr_floppies=$n"
+            for (i in 1 until n) l += "floppy${i}type=0"
+            floppies.forEachIndexed { i, f -> if (f != null && i < n) l += "floppy$i=$f" }
+            if (s.jit && bigBox(model)) {
+                // JIT : 68040 traduit en code ARM64, à pleine vitesse, avec 64 Mo de Fast Zorro III
+                l += listOf(
+                    "cpu_model=68040", "fpu_model=68040", "cpu_24bit_addressing=false",
+                    "cpu_compatible=false", "cycle_exact=false", "cpu_memory_cycle_exact=false", "cpu_speed=max",
+                    "cachesize=16384", "compfpu=true", "comp_constjump=true", "comp_flushmode=soft", "comp_nf=true",
+                    "comp_trustbyte=direct", "comp_trustword=direct", "comp_trustlong=direct", "comp_trustnaddr=direct",
+                    "z3mem_size=64"
+                )
+            } else l += listOf("cycle_exact=false", "cpu_compatible=false")
+            l += "ntsc=${s.ntsc}"
+            l += "gfx_resolution=hires"
+            // Carte RTG sur le Zorro III : il lui faut un processeur 32 bits (le 68EC020 de l'A1200 n'adresse que 16 Mo)
+            if (s.rtg && bigBox(model)) {
+                l += listOf("gfxcard_type=ZorroIII", "gfxcard_size=32")
+                if (!s.jit && model == "A1200") l += listOf("cpu_model=68020", "cpu_24bit_addressing=false")
+            }
+            // Disques durs sur le pilote d'UAE (uaehf.device) : démarrent AGS et les Workbench préinstallés.
+            // Les disques RDB gardent les noms et priorités de démarrage de leurs partitions.
+            hds.forEachIndexed { i, path -> l += "hardfile2=rw,DH$i:$path,0,0,0,512,${if (i == 0) 0 else -1},,uae$i" }
+            // SHARED: : jamais un disque de démarrage
+            if (shared != null) l += "filesystem2=rw,DH12:SHARED:${shared.path},-128"
         }
-        l += listOf("nr_floppies=2", "floppy1type=0")
-        if (df0 != null) l += "floppy0=$df0"
-        if (df1 != null) l += "floppy1=$df1"
-        if (s.jit && !a500) {
-            // JIT : 68040 traduit en code ARM64, à pleine vitesse, avec 64 Mo de Fast Zorro III
-            l += listOf(
-                "cpu_model=68040", "fpu_model=68040", "cpu_24bit_addressing=false",
-                "cpu_compatible=false", "cycle_exact=false", "cpu_memory_cycle_exact=false", "cpu_speed=max",
-                "cachesize=16384", "compfpu=true", "comp_constjump=true", "comp_flushmode=soft", "comp_nf=true",
-                "comp_trustbyte=direct", "comp_trustword=direct", "comp_trustlong=direct", "comp_trustnaddr=direct",
-                "z3mem_size=64"
-            )
-        } else l += listOf("cycle_exact=false", "cpu_compatible=false")
-        l += "ntsc=${s.ntsc}"
-        l += "gfx_resolution=hires"
-        // Carte RTG sur le Zorro III : il lui faut un processeur 32 bits (le 68EC020 de l'A1200 n'adresse que 16 Mo)
-        if (s.rtg && !a500) {
-            l += listOf("gfxcard_type=ZorroIII", "gfxcard_size=32")
-            if (!s.jit) l += listOf("cpu_model=68020", "cpu_24bit_addressing=false")
-        }
-        // Disques durs sur le pilote d'UAE (uaehf.device) : démarrent AGS et les Workbench préinstallés.
-        // Les disques RDB gardent les noms et priorités de démarrage de leurs partitions.
-        hds.forEachIndexed { i, path -> l += "hardfile2=rw,DH$i:$path,0,0,0,512,${if (i == 0) 0 else -1},,uae$i" }
-        // SHARED: : jamais un disque de démarrage
-        if (shared != null) l += "filesystem2=rw,DH12:SHARED:${shared.path},-128"
         val f = File(ctx.filesDir, "cfg/amiga.uae")
         f.parentFile?.mkdirs()
         f.writeText(l.joinToString("\n") + "\n")

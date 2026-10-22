@@ -51,6 +51,8 @@ class EmuActivity : Activity(), SurfaceHolder.Callback {
     private val dimBar = Runnable { bar.animate().alpha(0.3f).setDuration(400).start() }
     /** Lecteur (0 = DF0:, 1 = DF1:) du prochain document choisi */
     private var diskDrive = 0
+    /** Lecteurs de disquettes branchés à l'allumage (DF2: et DF3: seulement s'ils avaient une disquette) */
+    private var drives = 2
     private val ui = Handler(Looper.getMainLooper())
     private var running = false
     private var paused = false
@@ -130,31 +132,58 @@ class EmuActivity : Activity(), SurfaceHolder.Callback {
     // ---------- démarrage ----------
     private fun logFile() = File(filesDir, "journal.txt")
 
+    /** Jeu WHDLoad lancé depuis la Bibliothèque (archive .lha) : le cœur le monte et le démarre lui-même */
+    private val whdUri get() = intent.getStringExtra(EXTRA_WHD_URI)
+    private val whdName get() = intent.getStringExtra(EXTRA_WHD_NAME) ?: "jeu.lha"
+
     private fun boot() {
         Native.setLogFile(logFile().path)
         Native.log("amiga1200-android ${BuildConfig.VERSION_NAME}, Android ${Build.VERSION.RELEASE}, ${Build.MANUFACTURER} ${Build.MODEL}")
-        val df0 = Disks.link(this, s.df0, s.df0Name)
-        if (s.df0.isNotEmpty() && df0 == null) toast("Disquette ${s.df0Name} : accès refusé, choisissez-la à nouveau")
-        val df1 = Disks.link(this, s.df1, "df1-${s.df1Name}")
-        if (s.df1.isNotEmpty() && df1 == null) toast("Disquette ${s.df1Name} : accès refusé, choisissez-la à nouveau")
-        val hds = s.hds.mapIndexedNotNull { i, h ->
-            // Nom précédé du numéro : deux disques de même nom venant de dossiers différents restent distincts
-            Disks.link(this, h.uri, "dh$i-${h.name}").also { if (it == null) toast("Disque dur ${h.name} : accès refusé, choisissez-le à nouveau") }
-        }
-        val shared = if (hds.isNotEmpty() && s.shared) Config.sharedDir(this) else null
-        val cfg = Config.write(this, s, df0, df1, hds, shared)
+        val content = whdUri?.let { uri ->
+            // WHDLoad : fichiers de démarrage d'Amiberry, réglages du jeu tirés de sa base, Kickstart reconnu dans files/sys
+            WhdBoot.ensure(this)
+            Native.log("WHDLoad : $whdName")
+            Disks.link(this, uri, Disks.safe(whdName)) ?: run { fail("le jeu $whdName est illisible, choisissez-le à nouveau"); return }
+        } ?: machineConfig()
         Native.setDirs(Config.sysDir(this).path, Config.saveDir(this).path)
         // Options du cœur : celles de la version web (cadrage automatique, pas de barre d'état, manette 0 au port joystick)
         Native.setOption("amiberry_crop_overscan", "enabled")
         Native.setOption("amiberry_statusline", "disabled")
         Native.setOption("amiberry_joyport_order", "21")
-        if (!Native.start(cfg.path)) { fail("le fil de l'émulation n'a pas pu démarrer"); return }
+        startCore(content)
+    }
+
+    /** Machine de l'écran d'accueil : disquettes, disques durs, SHARED:, écrite en configuration .uae */
+    private fun machineConfig(): String {
+        val floppies = (0..3).map { n ->
+            val (uri, name) = s.floppy(n)
+            // Nom précédé du lecteur (DF1: à DF3:) : la même disquette peut aller dans deux lecteurs
+            Disks.link(this, uri, if (n == 0) name else "df$n-$name").also {
+                if (uri.isNotEmpty() && it == null) toast("Disquette $name : accès refusé, choisissez-la à nouveau")
+            }
+        }
+        drives = if (floppies.drop(2).any { it != null }) 4 else 2
+        val cd = if (s.model == "CD32") Disks.link(this, s.cd, s.cdName).also {
+            if (s.cd.isNotEmpty() && it == null) toast("CD ${s.cdName} : accès refusé, choisissez-le à nouveau")
+        } else null
+        val hds = if (s.model == "CD32") emptyList() else s.hds.mapIndexedNotNull { i, h ->
+            // Nom précédé du numéro : deux disques de même nom venant de dossiers différents restent distincts
+            Disks.link(this, h.uri, "dh$i-${h.name}").also { if (it == null) toast("Disque dur ${h.name} : accès refusé, choisissez-le à nouveau") }
+        }
+        val shared = if (hds.isNotEmpty() && s.shared) Config.sharedDir(this) else null
+        return Config.write(this, s, floppies, hds, shared, cd).path
+    }
+
+    private fun startCore(content: String) {
+        if (!Native.start(content)) { fail("le fil de l'émulation n'a pas pu démarrer"); return }
         val t0 = System.currentTimeMillis()
         ui.post(object : Runnable {
             override fun run() {
                 when (Native.state()) {
                     2 -> {
                         running = true; Native.frames(); Native.busyUs(); ui.postDelayed(stats, 1000)
+                        // CD32 : la manette du port joystick devient une manette CD32 (7 boutons)
+                        if (s.model == "CD32" && whdUri == null) Native.portDevice(1, 513)
                         if (intent.getBooleanExtra(EXTRA_RESUME, false)) ui.postDelayed({ resume() }, 1500)
                         else Config.resumeFile(this@EmuActivity).delete() // les disques vont changer : l'ancien état ne vaut plus
                     }
@@ -247,7 +276,7 @@ class EmuActivity : Activity(), SurfaceHolder.Callback {
             add(0, 12, 0, "Journal (diagnostic)")
             add(0, 15, 0, "Aide")
         }
-        if (s.model == "A1200") mm.add(0, 17, 0, if (s.jit) "⚡  Redémarrer sans JIT (démos)" else "⚡  Redémarrer avec le JIT")
+        if (Config.bigBox(s.model) && whdUri == null) mm.add(0, 17, 0, if (s.jit) "⚡  Redémarrer sans JIT (démos)" else "⚡  Redémarrer avec le JIT")
         mm.add(0, 10, 0, "↺  Réinitialiser l'Amiga")
         mm.add(0, 11, 0, "⏻  Éteindre")
         m.setOnMenuItemClickListener {
@@ -385,15 +414,15 @@ class EmuActivity : Activity(), SurfaceHolder.Callback {
 
     // ---------- disquettes ----------
     private fun disks() {
-        val names = arrayOf("DF0: " + s.df0Name.ifEmpty { "vide" }, "DF1: " + s.df1Name.ifEmpty { "vide" })
+        val names = (0..3).map { n -> "DF$n: " + s.floppy(n).second.ifEmpty { "vide" } }.toTypedArray()
         var chosen = 0
         android.app.AlertDialog.Builder(this)
             .setTitle("Disquettes")
             .setSingleChoiceItems(names, 0) { _, w -> chosen = w }
             .setPositiveButton("Insérer…") { _, _ -> diskDrive = chosen; pickDisk() }
             .setNeutralButton("Éjecter") { _, _ ->
-                Native.insertDisk(chosen, "")
-                if (chosen == 0) { s.df0 = ""; s.df0Name = "" } else { s.df1 = ""; s.df1Name = "" }
+                if (chosen < drives) Native.insertDisk(chosen, "")
+                s.setFloppy(chosen, "", "")
                 toast("DF$chosen: éjectée")
             }
             .setNegativeButton("Fermer", null)
@@ -416,9 +445,12 @@ class EmuActivity : Activity(), SurfaceHolder.Callback {
         catch (_: Exception) { try { contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION) } catch (_: Exception) {} }
         val name = Disks.displayName(this, uri)
         val d = diskDrive
-        val path = Disks.link(this, uri.toString(), if (d == 0) name else "df1-$name")
+        Library.add(this, uri.toString(), name)
+        s.setFloppy(d, uri.toString(), name)
+        // DF2: et DF3: n'existent que s'ils étaient branchés à l'allumage
+        if (d >= drives) { toast("DF$d: $name, branché au prochain allumage (☰ → Réinitialiser)"); return }
+        val path = Disks.link(this, uri.toString(), if (d == 0) name else "df$d-$name")
         if (path == null) { toast("Lecture de $name impossible"); return }
-        if (d == 0) { s.df0 = uri.toString(); s.df0Name = name } else { s.df1 = uri.toString(); s.df1Name = name }
         Native.insertDisk(d, path)
         toast("DF$d: $name")
     }
@@ -429,13 +461,14 @@ class EmuActivity : Activity(), SurfaceHolder.Callback {
         startActivity(Intent(this, MainActivity::class.java).apply {
             addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
             putExtra(MainActivity.EXTRA_RESTART, true)
+            whdUri?.let { putExtra(EXTRA_WHD_URI, it); putExtra(EXTRA_WHD_NAME, whdName) }
         })
         quit()
     }
 
     /** Extinction : l'état est gardé pour « Reprendre où j'en étais » (une seule fois, avec les mêmes disques) */
     private fun powerOff() {
-        if (!running) { quit(); return }
+        if (!running || whdUri != null) { quit(); return }  // jeu WHDLoad : ses sauvegardes sont dans WHDSaves
         setPaused(true)
         toastShort("Extinction…")
         Thread {
@@ -613,6 +646,8 @@ class EmuActivity : Activity(), SurfaceHolder.Callback {
     private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
     companion object {
         const val EXTRA_RESUME = "reprendre"
+        const val EXTRA_WHD_URI = "whd"
+        const val EXTRA_WHD_NAME = "whdNom"
     }
     private fun toast(t: String) = Toast.makeText(this, t, Toast.LENGTH_LONG).show()
     private fun toastShort(t: String) = Toast.makeText(this, t, Toast.LENGTH_SHORT).show()

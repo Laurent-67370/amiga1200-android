@@ -7,3 +7,4 @@ native/src/
 native/out/
 app/src/main/jniLibs/
 app/src/main/assets/aros/
+app/src/main/assets/whdboot/

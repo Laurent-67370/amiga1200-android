@@ -455,6 +455,13 @@ JNIEXPORT void JNICALL JNI(key)(JNIEnv *env, jobject self, jboolean down, jint r
   __atomic_store_n(&kq_w, n, __ATOMIC_RELEASE);
 }
 
+JNIEXPORT void JNICALL JNI(portDevice)(JNIEnv *env, jobject self, jint port, jint device) {
+  (void)env; (void)self;
+  pthread_mutex_lock(&emu_mtx);
+  retro_set_controller_port_device((unsigned)port, (unsigned)device);
+  pthread_mutex_unlock(&emu_mtx);
+}
+
 /* ---------- disquettes ---------- */
 JNIEXPORT void JNICALL JNI(insertDisk)(JNIEnv *env, jobject self, jint drive, jstring path) {
   (void)self;

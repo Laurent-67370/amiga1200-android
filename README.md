@@ -19,8 +19,15 @@ les réglages.
 
 ## Ce que fait le prototype
 
+- **Jeux WHDLoad en un geste** : une archive `.lha` de la Bibliothèque se lance d'un toucher. Le cœur Amiberry monte
+  le jeu, applique ses réglages (base de jeux d'Amiberry) et garde ses sauvegardes. Il faut un vrai Kickstart.
+- **Bibliothèque** : jeux WHDLoad, disquettes et disques durs déjà choisis, retrouvés d'un toucher (lus sur place).
 - **Kickstart** : vous choisissez le vôtre (copié dans l'application). Sinon, la ROM libre **AROS** est fournie.
-- **Machines** : Amiga 1200 et Amiga 500.
+- **Machines** : Amiga 500, 600, 1200, 4000 et CD32 (CD en .iso ou .chd, avec la ROM de la console et sa manette
+  à 7 boutons).
+- **Quatre lecteurs de disquettes** (DF0: à DF3:).
+- **Configurations enregistrées** sous un nom, **export et import .uae** (WinUAE, Amiberry, version web ; les disques
+  sont retrouvés par leur nom dans la Bibliothèque).
 - **JIT** (A1200) : 68040 avec FPU, vitesse maximale et 64 Mo de mémoire Fast Zorro III. Désactivez-le pour
   retrouver un A1200 d'origine (68020).
 - **Disquette DF0:** (ADF, DMS, IPF…) et jusqu'à **8 disques durs** (HDF, DH0: à DH7:, AGS compris). Ils sont

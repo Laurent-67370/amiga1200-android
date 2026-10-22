@@ -27,9 +27,16 @@ class MainActivity : Activity() {
     private lateinit var summary: TextView
     private lateinit var romText: TextView
     private lateinit var df0Text: TextView
+    private lateinit var cd32Text: TextView
+    private lateinit var cdText: TextView
+    private lateinit var cfgList: LinearLayout
     private lateinit var hdList: LinearLayout
     private lateinit var presets: LinearLayout
     private lateinit var resumeBtn: Button
+    private lateinit var libList: LinearLayout
+    private lateinit var libTabs: LinearLayout
+    private var libKind = Library.WHD
+    private var libAll = false
     private val switches = mutableListOf<Pair<Switch, () -> Boolean>>()
     private val choices = mutableListOf<Pair<TextView, () -> Boolean>>()
 
@@ -57,10 +64,23 @@ class MainActivity : Activity() {
             c.addView(note("Un geste règle la machine ; les détails restent modifiables plus bas."))
         }
 
+        // Bibliothèque
+        card(col, "📚 Bibliothèque") { c ->
+            libTabs = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+            c.addView(libTabs)
+            libList = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(0, dp(6), 0, 0) }
+            c.addView(libList)
+            c.addView(row(button("Ajouter des fichiers…") { pick(REQ_LIB, multiple = true) }))
+            c.addView(note("Jeux WHDLoad (.lha) lancés d'un toucher, disquettes et disques durs retrouvés sans les rechercher. Appui long : retirer de la bibliothèque (le fichier n'est pas effacé)."))
+        }
+
         // Kickstart
         card(col, "🔑 Kickstart") { c ->
             romText = TextView(this).also { c.addView(it) }
             c.addView(row(button("Choisir un fichier…") { pick(REQ_ROM) }, button("AROS (libre)") { s.rom = "aros"; refresh() }))
+            c.addView(label("ROM de la CD32"))
+            cd32Text = TextView(this).also { c.addView(it) }
+            c.addView(row(button("ROM CD32…") { pick(REQ_CD32) }, button("Extension…") { pick(REQ_CD32EXT) }))
         }
 
         // Disques
@@ -68,6 +88,9 @@ class MainActivity : Activity() {
             c.addView(label("Disquette DF0:"))
             df0Text = TextView(this).also { c.addView(it) }
             c.addView(row(button("Insérer…") { pick(REQ_DF0) }, button("Éjecter") { s.df0 = ""; s.df0Name = ""; profile(); refresh() }))
+            c.addView(label("CD de la CD32 (.iso ou .chd)"))
+            cdText = TextView(this).also { c.addView(it) }
+            c.addView(row(button("Choisir un CD…") { pick(REQ_CD) }))
             c.addView(label("Disques durs (lus sur place, sans copie)"))
             hdList = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
             c.addView(hdList)
@@ -77,9 +100,12 @@ class MainActivity : Activity() {
 
         // Machine
         card(col, "⚙️ Machine") { c ->
-            c.addView(row(choice("Amiga 1200", { s.model == "A1200" }) { s.model = "A1200" },
-                choice("Amiga 500", { s.model == "A500" }) { s.model = "A500" }))
-            c.addView(switch("JIT 68040 : beaucoup plus rapide (A1200)", { s.jit }) { s.jit = it })
+            c.addView(row(choice("A500", { s.model == "A500" }) { s.model = "A500" },
+                choice("A600", { s.model == "A600" }) { s.model = "A600" },
+                choice("A1200", { s.model == "A1200" }) { s.model = "A1200" }))
+            c.addView(row(choice("A4000", { s.model == "A4000" }) { s.model = "A4000" },
+                choice("CD32", { s.model == "CD32" }) { s.model = "CD32" }))
+            c.addView(switch("JIT 68040 : beaucoup plus rapide (A1200, A4000)", { s.jit }) { s.jit = it })
             c.addView(switch("Carte graphique RTG : haute résolution d'AGS et du Workbench", { s.rtg }) { s.rtg = it })
             c.addView(switch("Volume SHARED: (sauvegardes AGS et WHDLoad)", { s.shared }) { s.shared = it })
             c.addView(switch("NTSC 60 Hz (sinon PAL 50 Hz)", { s.ntsc }) { s.ntsc = it })
@@ -92,6 +118,14 @@ class MainActivity : Activity() {
             c.addView(switch("Afficher la vitesse en haut de l'écran", { s.showSpeed }) { s.showSpeed = it })
             c.addView(switch("Image étirée sur toute la largeur", { s.fill }) { s.fill = it })
             c.addView(row(button("Réglages des commandes…") { ControlsDialog.show(this, s) }))
+        }
+        // Configurations
+        card(col, "🗂 Configurations") { c ->
+            cfgList = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+            c.addView(cfgList)
+            c.addView(row(button("Enregistrer…") { saveConfigDialog() }))
+            c.addView(row(button("Exporter .uae…") { exportUae() }, button("Importer .uae…") { pick(REQ_UAE) }))
+            c.addView(note("Une configuration garde la machine et ses disques. L'export .uae se relit dans WinUAE, Amiberry et la version web ; l'import retrouve les disques par leur nom dans la Bibliothèque."))
         }
         col.addView(note("Version ${BuildConfig.VERSION_NAME} · même cœur que la version web laurent-67370.github.io/amiga1200"))
 
@@ -115,7 +149,9 @@ class MainActivity : Activity() {
         }
         setContentView(root)
         refresh()
-        if (intent?.getBooleanExtra(EXTRA_RESTART, false) == true) window.decorView.postDelayed({ power() }, 1200)
+        if (intent?.getBooleanExtra(EXTRA_RESTART, false) == true) window.decorView.postDelayed({
+            power(intent.getStringExtra(EmuActivity.EXTRA_WHD_URI), intent.getStringExtra(EmuActivity.EXTRA_WHD_NAME))
+        }, 1200)
         else if (!getSharedPreferences("aide", MODE_PRIVATE).getBoolean("vue", false)) {
             getSharedPreferences("aide", MODE_PRIVATE).edit().putBoolean("vue", true).apply()
             window.decorView.post { help() }
@@ -127,13 +163,20 @@ class MainActivity : Activity() {
 
     private fun refresh() {
         val a500 = s.model == "A500"
-        val parts = mutableListOf(if (a500) "Amiga 500" else "Amiga 1200")
-        if (!a500) parts += if (s.jit) "68040 JIT" else "68020"
-        if (!a500 && s.rtg) parts += "RTG"
-        parts += if (userRom()) "Kickstart ${s.romName.substringBeforeLast('.')}" else "AROS"
+        val cd32 = s.model == "CD32"
+        val big = Config.bigBox(s.model)
+        val parts = mutableListOf(if (cd32) "CD32" else "Amiga ${s.model.removePrefix("A")}")
+        if (big) parts += if (s.jit) "68040 JIT" else if (s.model == "A1200") "68020" else "68030"
+        if (big && s.rtg) parts += "RTG"
+        if (cd32) parts += if (cd32Rom()) "ROM CD32" else "ROM CD32 manquante"
+        else parts += if (userRom()) "Kickstart ${s.romName.substringBeforeLast('.')}" else "AROS"
         val n = s.hds.size
-        if (n > 0) parts += "$n disque${if (n > 1) "s" else ""} dur${if (n > 1) "s" else ""}"
-        if (s.df0Name.isNotEmpty()) parts += "DF0: ${s.df0Name}"
+        if (!cd32 && n > 0) parts += "$n disque${if (n > 1) "s" else ""} dur${if (n > 1) "s" else ""}"
+        if (!cd32 && s.df0Name.isNotEmpty()) parts += "DF0: ${s.df0Name}"
+        if (cd32) parts += if (s.cdName.isNotEmpty()) "CD : ${s.cdName}" else "sans CD"
+        cd32Text.text = if (cd32Rom()) "✓ ROM CD32" + (if (File(Config.sysDir(this), "cd32ext.rom").exists()) " et extension" else " (ROM complète de 1 Mo, ou ajoutez l'extension)")
+            else "Aucune : la CD32 a besoin de sa ROM (kick40060.CD32 + extension, ou ROM complète de 1 Mo)."
+        cdText.text = s.cdName.ifEmpty { "aucun" }
         summary.text = parts.joinToString(" · ")
 
         romText.text = if (userRom()) "✓ ${s.romName}" else "AROS, ROM libre fournie. Pour les jeux et AGS, choisissez votre Kickstart 3.1 (A1200) ou 1.3 (A500)."
@@ -157,17 +200,148 @@ class MainActivity : Activity() {
             preset("AGS / Workbench", "A1200, JIT, RTG", s.model == "A1200" && s.jit && s.rtg) { s.model = "A1200"; s.jit = true; s.rtg = true; s.shared = true },
             preset("A1200 d'origine", "68020, jeux AGA", s.model == "A1200" && !s.jit && !s.rtg) { s.model = "A1200"; s.jit = false; s.rtg = false }))
         presets.addView(row(
-            preset("Amiga 500", "jeux et démos OCS", a500) { s.model = "A500"; s.jit = false; s.rtg = false }))
+            preset("Amiga 500", "jeux et démos OCS", a500) { s.model = "A500"; s.jit = false; s.rtg = false },
+            preset("CD32", "jeux sur CD", cd32) { s.model = "CD32" }))
         val rf = Config.resumeFile(this)
         val canResume = rf.exists() && s.resumeSig == s.signature()
         resumeBtn.visibility = if (canResume) View.VISIBLE else View.GONE
         if (canResume) resumeBtn.text = "⏯  Reprendre où j'en étais (" +
             java.text.SimpleDateFormat("dd/MM HH:mm", java.util.Locale.FRANCE).format(java.util.Date(rf.lastModified())) + ")"
+        refreshLibrary()
+        refreshConfigs()
         for ((sw, get) in switches) sw.isChecked = get()
         for ((v, on) in choices) {
             v.background = rounded(if (on()) ACCENT else CHIP)
             v.setTextColor(if (on()) Color.WHITE else Color.rgb(220, 220, 225))
         }
+    }
+
+    // ---------- bibliothèque ----------
+    private fun refreshLibrary() {
+        val items = Library.all(this)
+        libTabs.removeAllViews()
+        for ((kind, label) in listOf(Library.WHD to "🎮 Jeux", Library.FLOPPY to "💾 Disq.", Library.HDF to "🗄 HDF", Library.CD to "💿 CD")) {
+            val n = items.count { it.kind == kind }
+            libTabs.addView(TextView(this).apply {
+                text = if (n > 0) "$label ($n)" else label; textSize = 13f; gravity = Gravity.CENTER
+                setPadding(dp(8), dp(6), dp(8), dp(6))
+                background = rounded(if (kind == libKind) ACCENT else CHIP, 16)
+                setTextColor(Color.WHITE)
+                setOnClickListener { libKind = kind; libAll = false; refreshLibrary() }
+            }, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f).apply { marginEnd = dp(4) })
+        }
+        libList.removeAllViews()
+        val shown = items.filter { it.kind == libKind }
+        if (shown.isEmpty()) {
+            libList.addView(TextView(this).apply {
+                alpha = 0.7f
+                text = when (libKind) {
+                    Library.WHD -> "Aucun jeu. Ajoutez des archives WHDLoad (.lha) : un toucher les lance, sans disque dur à préparer."
+                    Library.FLOPPY -> "Aucune disquette (ADF, DMS, IPF…)."
+                    Library.CD -> "Aucun CD de CD32 (.iso ou .chd : l'image doit tenir dans un seul fichier)."
+                    else -> "Aucun disque dur (.hdf)."
+                }
+            })
+            return
+        }
+        for (it in if (libAll) shown else shown.take(8)) {
+            libList.addView(LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(0, dp(2), 0, dp(2))
+                addView(TextView(this@MainActivity).apply { text = it.name.substringBeforeLast('.'); textSize = 15f }, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f))
+                when (it.kind) {
+                    Library.WHD -> addView(chip("▶ Jouer") { playWhd(it) })
+                    Library.FLOPPY -> addView(chip("DF0:") { useFloppy(it) })
+                    Library.CD -> addView(chip("▶ CD32") { playCd(it) })
+                    else -> addView(chip(if (s.hds.any { h -> h.uri == it.uri }) "✓ branché" else "+ Brancher") { useHdf(it) })
+                }
+                setOnLongClickListener { _ ->
+                    AlertDialog.Builder(this@MainActivity).setTitle(it.name).setMessage("Retirer de la bibliothèque ? Le fichier lui-même n'est pas effacé.")
+                        .setPositiveButton("Retirer") { _, _ -> Library.remove(this@MainActivity, it.uri); refreshLibrary() }
+                        .setNegativeButton("Annuler", null).show()
+                    true
+                }
+            })
+        }
+        if (!libAll && shown.size > 8) libList.addView(chip("Tout afficher (${shown.size})") { libAll = true; refreshLibrary() })
+    }
+
+    /** Jeu WHDLoad : il faut un vrai Kickstart (avec AROS, WHDLoad s'arrête) */
+    private fun playWhd(it: LibItem) {
+        if (!userRom()) {
+            AlertDialog.Builder(this).setTitle("Kickstart nécessaire")
+                .setMessage("WHDLoad a besoin d'un vrai Kickstart (3.1 de l'A1200 de préférence) : AROS ne lui suffit pas. Choisissez votre fichier ROM dans la carte Kickstart.")
+                .setPositiveButton("Choisir…") { _, _ -> pick(REQ_ROM) }.setNegativeButton("Annuler", null).show()
+            return
+        }
+        Library.touch(this, it.uri)
+        power(it.uri, it.name)
+    }
+
+    private fun cd32Rom() = File(Config.sysDir(this), "cd32.rom").exists()
+
+    /** CD de la CD32 : la console démarre dessus (il lui faut sa ROM) */
+    private fun playCd(it: LibItem) {
+        if (!cd32Rom()) {
+            AlertDialog.Builder(this).setTitle("ROM de la CD32 nécessaire")
+                .setMessage("La CD32 démarre sur sa propre ROM : choisissez kick40060.CD32 (puis son extension), ou une ROM complète de 1 Mo, dans la carte Kickstart.")
+                .setPositiveButton("Choisir…") { _, _ -> pick(REQ_CD32) }.setNegativeButton("Annuler", null).show()
+            return
+        }
+        Library.touch(this, it.uri)
+        s.cd = it.uri; s.cdName = it.name; s.model = "CD32"
+        refresh()
+        power()
+    }
+
+    private fun useFloppy(it: LibItem) {
+        Library.touch(this, it.uri)
+        s.df0 = it.uri; s.df0Name = it.name; profile(); refresh()
+        toast("DF0: ${it.name}")
+    }
+
+    private fun useHdf(it: LibItem) {
+        val list = s.hds.toMutableList()
+        if (list.any { h -> h.uri == it.uri }) { s.hds = list.filter { h -> h.uri != it.uri }; refresh(); return }
+        if (list.size >= 8) { toast("8 disques durs au plus"); return }
+        Library.touch(this, it.uri)
+        list += Hd(it.uri, it.name)
+        list.sortBy { h -> if (h.name.equals("Workbench.hdf", true)) 0 else 1 }
+        s.hds = list; profile(); refresh()
+    }
+
+    // ---------- configurations ----------
+    private fun refreshConfigs() {
+        cfgList.removeAllViews()
+        val all = s.savedConfigs()
+        if (all.length() == 0) { cfgList.addView(TextView(this).apply { text = "aucune"; alpha = 0.7f }); return }
+        for (name in all.keys().asSequence().sorted()) {
+            cfgList.addView(LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
+                addView(TextView(this@MainActivity).apply { text = name; textSize = 15f }, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f))
+                addView(chip("Charger") { s.restore(all.getJSONObject(name)); refresh(); toast("Configuration « $name »") })
+                addView(chip("✕") {
+                    AlertDialog.Builder(this@MainActivity).setTitle("Supprimer « $name » ?")
+                        .setPositiveButton("Supprimer") { _, _ -> s.deleteConfig(name); refresh() }.setNegativeButton("Annuler", null).show()
+                })
+            })
+        }
+    }
+
+    private fun saveConfigDialog() {
+        val input = android.widget.EditText(this).apply { hint = "Nom (ex. AGS, Jeux A500…)"; setText(s.bootKey().substringBeforeLast('.')) }
+        AlertDialog.Builder(this).setTitle("Enregistrer la configuration").setView(input)
+            .setPositiveButton("Enregistrer") { _, _ ->
+                val n = input.text.toString().trim()
+                if (n.isNotEmpty()) { s.saveConfig(n); refresh(); toast("Configuration « $n » enregistrée") }
+            }.setNegativeButton("Annuler", null).show()
+    }
+
+    private fun exportUae() {
+        if (!File(filesDir, "cfg/amiga.uae").exists()) { toast("Allumez l'Amiga une fois avec cette configuration, puis exportez-la"); return }
+        startActivityForResult(Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE); type = "application/octet-stream"
+            putExtra(Intent.EXTRA_TITLE, (s.bootKey().substringBeforeLast('.').ifEmpty { "amiga" }) + ".uae")
+        }, REQ_UAE_OUT)
     }
 
     // ---------- aide ----------
@@ -207,6 +381,15 @@ class MainActivity : Activity() {
     override fun onActivityResult(req: Int, res: Int, data: Intent?) {
         super.onActivityResult(req, res, data)
         if (res != RESULT_OK || data == null) return
+        if (req == REQ_LIB) {
+            val uris = data.clipData?.let { c -> (0 until c.itemCount).map { c.getItemAt(it).uri } } ?: listOfNotNull(data.data)
+            var last = Library.WHD
+            for (u in uris) { keep(u); val n = Disks.displayName(this, u); Library.add(this, u.toString(), n); last = Library.kindOf(n) }
+            libKind = last
+            toast("${uris.size} fichier${if (uris.size > 1) "s" else ""} ajouté${if (uris.size > 1) "s" else ""} à la bibliothèque")
+            refresh()
+            return
+        }
         if (req == REQ_HD) {
             // Un ou plusieurs disques, ajoutés à la suite (8 au plus)
             val uris = data.clipData?.let { c -> (0 until c.itemCount).map { c.getItemAt(it).uri } } ?: listOfNotNull(data.data)
@@ -214,7 +397,9 @@ class MainActivity : Activity() {
             for (u in uris) {
                 if (list.size >= 8) { toast("8 disques durs au plus"); break }
                 keep(u)
-                if (list.none { it.uri == u.toString() }) list += Hd(u.toString(), Disks.displayName(this, u))
+                val n = Disks.displayName(this, u)
+                Library.add(this, u.toString(), n)
+                if (list.none { it.uri == u.toString() }) list += Hd(u.toString(), n)
             }
             // Le Workbench d'AGS démarre : placé en premier s'il vient d'être ajouté
             list.sortBy { if (it.name.equals("Workbench.hdf", true)) 0 else 1 }
@@ -226,11 +411,24 @@ class MainActivity : Activity() {
         val uri: Uri = data.data ?: return
         val name = Disks.displayName(this, uri)
         when (req) {
+            REQ_UAE -> toast(ConfigsIO.import(this, s, uri))
+            REQ_UAE_OUT -> toast(if (ConfigsIO.export(this, s, uri)) "Configuration exportée : $name" else "Export impossible")
+            REQ_CD32, REQ_CD32EXT -> {
+                val f = File(Config.sysDir(this), if (req == REQ_CD32) "cd32.rom" else "cd32ext.rom")
+                if (!Disks.copy(this, uri, f)) toast("Lecture de la ROM impossible")
+                else toast(if (req == REQ_CD32) "ROM CD32 : $name" else "Extension CD32 : $name")
+            }
+            REQ_CD -> { keep(uri); Library.add(this, uri.toString(), name); s.cd = uri.toString(); s.cdName = name; profile() }
             REQ_ROM -> {
                 if (Disks.copy(this, uri, File(Config.sysDir(this), "kick.rom"))) { s.rom = "user"; s.romName = name }
                 else toast("Lecture du Kickstart impossible")
             }
-            REQ_DF0 -> { keep(uri); s.df0 = uri.toString(); s.df0Name = name; profile() }
+            REQ_DF0 -> {
+                keep(uri); Library.add(this, uri.toString(), name)
+                // Une archive WHDLoad choisie comme disquette : elle se lance comme un jeu
+                if (Library.kindOf(name) == Library.WHD) { libKind = Library.WHD; refresh(); playWhd(Library.all(this).first { it.uri == uri.toString() }); return }
+                s.df0 = uri.toString(); s.df0Name = name; profile()
+            }
         }
         refresh()
     }
@@ -246,8 +444,10 @@ class MainActivity : Activity() {
         catch (_: Exception) { try { contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION) } catch (_: Exception) {} }
     }
 
-    private fun power() {
-        startActivity(Intent(this, EmuActivity::class.java))
+    private fun power(whdUri: String? = null, whdName: String? = null) {
+        startActivity(Intent(this, EmuActivity::class.java).apply {
+            if (whdUri != null) { putExtra(EmuActivity.EXTRA_WHD_URI, whdUri); putExtra(EmuActivity.EXTRA_WHD_NAME, whdName) }
+        })
     }
 
     override fun onResume() {
@@ -259,7 +459,9 @@ class MainActivity : Activity() {
     /** Redémarrage demandé par l'émulation (« Réinitialiser ») : rallumage une fois son ancien processus terminé */
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
-        if (intent.getBooleanExtra(EXTRA_RESTART, false)) window.decorView.postDelayed({ power() }, 1200)
+        if (intent.getBooleanExtra(EXTRA_RESTART, false)) window.decorView.postDelayed({
+            power(intent.getStringExtra(EmuActivity.EXTRA_WHD_URI), intent.getStringExtra(EmuActivity.EXTRA_WHD_NAME))
+        }, 1200)
     }
 
     // ---------- éléments d'interface ----------
@@ -316,6 +518,12 @@ class MainActivity : Activity() {
         const val REQ_ROM = 1
         const val REQ_DF0 = 2
         const val REQ_HD = 3
+        const val REQ_LIB = 4
+        const val REQ_CD32 = 5
+        const val REQ_CD32EXT = 6
+        const val REQ_CD = 7
+        const val REQ_UAE = 8
+        const val REQ_UAE_OUT = 9
         const val EXTRA_RESTART = "rallumer"
         private val ACCENT = Color.rgb(230, 92, 30)
         private val BG = Color.rgb(20, 22, 28)
