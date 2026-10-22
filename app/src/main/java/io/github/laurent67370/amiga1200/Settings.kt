@@ -70,6 +70,16 @@ class Settings(ctx: Context) {
     var fill: Boolean get() = p.getBoolean("fill", false); set(v) = flag("fill", v)
     var showSpeed: Boolean get() = p.getBoolean("showSpeed", true); set(v) = flag("showSpeed", v)
 
+    // ---------- son et MIDI ----------
+    /** Bruits des lecteurs de disquettes (clic de la tête, rotation), comme sur un vrai Amiga */
+    var floppySound: Boolean get() = p.getBoolean("floppySound", true); set(v) = flag("floppySound", v)
+    /** MIDI sur le port série de l'Amiga (Bars & Pipes, Music-X, OctaMED, jeux qui parlent MIDI) */
+    var midi: Boolean get() = p.getBoolean("midi", false); set(v) = flag("midi", v)
+    /** Appareil qui reçoit ce que joue l'Amiga (vide : le premier trouvé) */
+    var midiOut: String get() = str("midiOut", ""); set(v) = put("midiOut", v)
+    /** Clavier MIDI qui joue sur l'Amiga (vide : aucun) */
+    var midiIn: String get() = str("midiIn", ""); set(v) = put("midiIn", v)
+
     // ---------- commandes ----------
     /** Vitesse du pointeur de la souris tactile (1 = le pointeur suit le doigt) */
     var mouseSpeed: Float get() = p.getFloat("mouseSpeed", 1f); set(v) { p.edit().putFloat("mouseSpeed", v).commit() }
@@ -218,6 +228,8 @@ object Config {
             val n = if (floppies.drop(2).any { it != null }) 4 else 2
             l += "nr_floppies=$n"
             for (i in 1 until n) l += "floppy${i}type=0"
+            // Bruits des lecteurs (échantillons d'Amiberry copiés dans files/data/floppy_sounds)
+            if (s.floppySound) for (i in 0 until n) l += "floppy${i}sound=1"
             floppies.forEachIndexed { i, f -> if (f != null && i < n) l += "floppy$i=$f" }
             if (s.jit && bigBox(model)) {
                 // JIT : 68040 traduit en code ARM64, à pleine vitesse, avec 64 Mo de Fast Zorro III
@@ -241,6 +253,11 @@ object Config {
             hds.forEachIndexed { i, path -> l += "hardfile2=rw,DH$i:$path,0,0,0,512,${if (i == 0) 0 else -1},,uae$i" }
             // SHARED: : jamais un disque de démarrage
             if (shared != null) l += "filesystem2=rw,DH12:SHARED:${shared.path},-128"
+        }
+        // MIDI du port série vers l'application (android.media.midi), comme la version web
+        if (s.midi) {
+            l += "amiberry.midiout_device_name=Libretro MIDI"
+            if (s.midiIn.isNotEmpty()) l += "amiberry.midiin_device_name=Libretro MIDI"
         }
         val f = File(ctx.filesDir, "cfg/amiga.uae")
         f.parentFile?.mkdirs()

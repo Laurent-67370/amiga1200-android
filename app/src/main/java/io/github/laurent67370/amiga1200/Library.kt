@@ -76,3 +76,17 @@ object WhdBoot {
         for (c in children) copy(ctx, "$asset/$c", File(dest, c))
     }
 }
+
+/** Bruits des lecteurs de disquettes d'Amiberry, copiés une fois depuis l'APK dans files/data/floppy_sounds : le cœur
+ *  les cherche dans « data/floppy_sounds », sous son dossier courant (files) */
+object FloppySounds {
+    fun ensure(ctx: Context) {
+        val dest = File(ctx.filesDir, "data/floppy_sounds")
+        val stamp = File(dest, ".version")
+        if (stamp.exists() && stamp.readText() == BuildConfig.VERSION_NAME) return
+        dest.mkdirs()
+        for (n in ctx.assets.list("floppy_sounds") ?: emptyArray())
+            ctx.assets.open("floppy_sounds/$n").use { i -> File(dest, n).outputStream().use { o -> i.copyTo(o) } }
+        stamp.writeText(BuildConfig.VERSION_NAME)
+    }
+}

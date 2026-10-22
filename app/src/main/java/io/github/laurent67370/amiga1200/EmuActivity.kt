@@ -57,6 +57,7 @@ class EmuActivity : Activity(), SurfaceHolder.Callback {
     private var running = false
     private var paused = false
     private var turbo = false
+    private var midi: MidiLink? = null
     /** Manettes : boutons et directions des joueurs 1 (port joystick) et 2 (port souris) ; la manette tactile joue 1 */
     private val padKeys = IntArray(2)
     private val padAxes = IntArray(2)
@@ -146,10 +147,14 @@ class EmuActivity : Activity(), SurfaceHolder.Callback {
             Disks.link(this, uri, Disks.safe(whdName)) ?: run { fail("le jeu $whdName est illisible, choisissez-le à nouveau"); return }
         } ?: machineConfig()
         Native.setDirs(Config.sysDir(this).path, Config.saveDir(this).path)
+        // Bruits des lecteurs : le cœur cherche data/floppy_sounds sous son dossier courant
+        FloppySounds.ensure(this)
+        Native.setHome(filesDir.path)
         // Options du cœur : celles de la version web (cadrage automatique, pas de barre d'état, manette 0 au port joystick)
         Native.setOption("amiberry_crop_overscan", "enabled")
         Native.setOption("amiberry_statusline", "disabled")
         Native.setOption("amiberry_joyport_order", "21")
+        Native.setOption("amiberry_midi_output", if (s.midi) "libretro" else "disabled")
         startCore(content)
     }
 
@@ -184,6 +189,7 @@ class EmuActivity : Activity(), SurfaceHolder.Callback {
                         running = true; Native.frames(); Native.busyUs(); ui.postDelayed(stats, 1000)
                         // CD32 : la manette du port joystick devient une manette CD32 (7 boutons)
                         if (s.model == "CD32" && whdUri == null) Native.portDevice(1, 513)
+                        if (s.midi) midi = MidiLink(this@EmuActivity, s).also { m -> m.start { msg -> Native.log(msg); toastShort(msg) } }
                         if (intent.getBooleanExtra(EXTRA_RESUME, false)) ui.postDelayed({ resume() }, 1500)
                         else Config.resumeFile(this@EmuActivity).delete() // les disques vont changer : l'ancien état ne vaut plus
                     }
@@ -273,6 +279,7 @@ class EmuActivity : Activity(), SurfaceHolder.Callback {
         }
         mm.addSubMenu(0, 102, 0, "🔧  Avancé").apply {
             add(0, 2, 0, if (turbo) "Vitesse normale" else "Turbo (mesure de vitesse)")
+            add(0, 18, 0, if (s.floppySound) "Couper le bruit des lecteurs" else "Bruit des lecteurs de disquettes")
             add(0, 12, 0, "Journal (diagnostic)")
             add(0, 15, 0, "Aide")
         }
@@ -295,6 +302,7 @@ class EmuActivity : Activity(), SurfaceHolder.Callback {
                 11 -> confirm("Éteindre l'Amiga ?", "L'Amiga est gardé tel quel : l'accueil proposera « Reprendre où j'en étais ».") { powerOff() }
                 12 -> journal()
                 15 -> help()
+                18 -> { s.floppySound = !s.floppySound; Native.floppySound(s.floppySound) }
                 16 -> ControlsDialog.show(this, s) { applyControls() }
                 17 -> {
                     s.jit = !s.jit  // retenu pour ce disque de démarrage
@@ -486,6 +494,7 @@ class EmuActivity : Activity(), SurfaceHolder.Callback {
 
     private fun quit() {
         running = false
+        midi?.stop()
         Native.stop()
         finish()
         // Le cœur ne se rallume pas dans le même processus : on le termine (après l'écriture des disques)

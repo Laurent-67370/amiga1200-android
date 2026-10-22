@@ -38,6 +38,10 @@ void fe_key(int down, unsigned retrok);
 int fe_start(const char *path);
 void fe_run(void);
 int fe_led(int i);
+void fe_midi_enable(int out, int in);
+unsigned fe_midi_out_read(uint8_t *dst, unsigned max);
+void fe_midi_in_write(const uint8_t *src, unsigned len);
+void amb_set_floppy_sound(int on);
 void fe_reset(void);
 double fe_fps(void);
 double fe_sample_rate(void);
@@ -328,6 +332,25 @@ static int cmd_code, cmd_res, cmd_done;   /* 1 sauvegarder, 2 reprendre */
 static void *cmd_buf;
 static unsigned cmd_len;
 
+/* MIDI du port série : le cœur lit et écrit les files du frontal dans ce fil-ci, entre deux images ; l'application
+ * (android.media.midi) échange avec deux autres files, à un seul lecteur et un seul écrivain chacune */
+#define MQ 16384
+static uint8_t mo[MQ], mi[MQ];
+static unsigned mo_w, mo_r, mi_w, mi_r;
+static void midi_pump(void) {
+  uint8_t b[512];
+  for (unsigned n; (n = fe_midi_out_read(b, sizeof b));)
+    for (unsigned i = 0; i < n; i++) {
+      unsigned w = __atomic_load_n(&mo_w, __ATOMIC_RELAXED), nw = (w + 1) % MQ;
+      if (nw == __atomic_load_n(&mo_r, __ATOMIC_ACQUIRE)) break;  /* l'application ne lit plus : octets perdus */
+      mo[w] = b[i]; __atomic_store_n(&mo_w, nw, __ATOMIC_RELEASE);
+    }
+  unsigned n = 0, r = __atomic_load_n(&mi_r, __ATOMIC_RELAXED), w = __atomic_load_n(&mi_w, __ATOMIC_ACQUIRE);
+  while (r != w && n < sizeof b) { b[n++] = mi[r]; r = (r + 1) % MQ; }
+  __atomic_store_n(&mi_r, r, __ATOMIC_RELEASE);
+  if (n) fe_midi_in_write(b, n);
+}
+
 static double now_ms(void) { struct timespec t; clock_gettime(CLOCK_MONOTONIC, &t); return t.tv_sec * 1000.0 + t.tv_nsec / 1e6; }
 
 static void emu_frame(void) {
@@ -336,6 +359,7 @@ static void emu_frame(void) {
   /* Une touche par image, dans l'ordre (l'Amiga voit chaque appui et chaque relâchement) */
   if (kq_r != kq_w) { unsigned k = kq[kq_r]; kq_r = (kq_r + 1) % KQ; fe_key((k & 0x80000000u) != 0, k & 0x7fffffffu); }
   fe_run();
+  midi_pump();
   pthread_mutex_unlock(&emu_mtx);
   stat_busy_us += (now_ms() - t0) * 1000.0;
   stat_frames++;
@@ -470,6 +494,53 @@ JNIEXPORT void JNICALL JNI(insertDisk)(JNIEnv *env, jobject self, jint drive, js
   if (p && *p) fe_drive_insert(drive, p); else fe_drive_eject(drive);
   pthread_mutex_unlock(&emu_mtx);
   free(p);
+}
+
+/* Bruits des lecteurs, à chaud (échantillons dans data/floppy_sounds, sous le dossier courant) */
+JNIEXPORT void JNICALL JNI(floppySound)(JNIEnv *env, jobject self, jboolean on) {
+  (void)env; (void)self;
+  pthread_mutex_lock(&emu_mtx);
+  amb_set_floppy_sound(on ? 1 : 0);
+  pthread_mutex_unlock(&emu_mtx);
+}
+/* Dossier courant : Amiberry cherche ses fichiers de données (bruits des lecteurs) dans « data/ », chemin relatif
+ * sur Android quand le frontal ne donne pas de stockage externe */
+JNIEXPORT jboolean JNICALL JNI(setHome)(JNIEnv *env, jobject self, jstring path) {
+  (void)self;
+  char *p = jstr(env, path);
+  int ok = p && chdir(p) == 0;
+  free(p);
+  return ok ? JNI_TRUE : JNI_FALSE;
+}
+
+/* ---------- MIDI ---------- */
+JNIEXPORT void JNICALL JNI(midiEnable)(JNIEnv *env, jobject self, jboolean out, jboolean in) {
+  (void)env; (void)self;
+  fe_midi_enable(out ? 1 : 0, in ? 1 : 0);
+}
+/* Octets envoyés par l'Amiga depuis le dernier appel */
+JNIEXPORT jint JNICALL JNI(midiRead)(JNIEnv *env, jobject self, jbyteArray dst) {
+  (void)self;
+  jsize max = (*env)->GetArrayLength(env, dst);
+  uint8_t b[4096];
+  unsigned n = 0, r = __atomic_load_n(&mo_r, __ATOMIC_RELAXED), w = __atomic_load_n(&mo_w, __ATOMIC_ACQUIRE);
+  while (r != w && n < sizeof b && n < (unsigned)max) { b[n++] = mo[r]; r = (r + 1) % MQ; }
+  __atomic_store_n(&mo_r, r, __ATOMIC_RELEASE);
+  if (n) (*env)->SetByteArrayRegion(env, dst, 0, (jsize)n, (const jbyte *)b);
+  return (jint)n;
+}
+/* Octets reçus d'un clavier MIDI, remis à l'Amiga à l'image suivante */
+JNIEXPORT void JNICALL JNI(midiWrite)(JNIEnv *env, jobject self, jbyteArray src, jint off, jint len) {
+  (void)self;
+  if (len <= 0) return;
+  jbyte *b = (*env)->GetByteArrayElements(env, src, NULL);
+  if (!b) return;
+  for (jint i = 0; i < len; i++) {
+    unsigned w = __atomic_load_n(&mi_w, __ATOMIC_RELAXED), nw = (w + 1) % MQ;
+    if (nw == __atomic_load_n(&mi_r, __ATOMIC_ACQUIRE)) break;
+    mi[w] = (uint8_t)b[off + i]; __atomic_store_n(&mi_w, nw, __ATOMIC_RELEASE);
+  }
+  (*env)->ReleaseByteArrayElements(env, src, b, JNI_ABORT);
 }
 
 /* ---------- sauvegardes d'état ---------- */

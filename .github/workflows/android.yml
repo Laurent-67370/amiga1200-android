@@ -44,6 +44,15 @@ jobs:
       - name: Nom de l'APK
         run: cp app/build/outputs/apk/release/app-release.apk amiga1200-android.apk
 
+      # Clé de publication (secrets du dépôt) : la clé de test lui passe le relais, l'APK s'installe par-dessus les
+      # versions de test sans rien perdre. Sans secret : clé de test, et essai de la rotation avec une clé jetable
+      - name: Signature
+        env:
+          KEYSTORE_B64: ${{ secrets.SIGNING_KEYSTORE_B64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.SIGNING_PASSWORD }}
+          SIGN_SELFTEST: "1"
+        run: scripts/sign-apk.sh amiga1200-android.apk
+
       - uses: actions/upload-artifact@v4
         with:
           name: amiga1200-android-apk
