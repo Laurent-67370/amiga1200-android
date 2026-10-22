@@ -69,4 +69,7 @@ ASSETS="$ROOT/app/src/main/assets/aros"
 mkdir -p "$ASSETS"
 cp "$WEB/vendor/aros/aros-20260820-rom.bin" "$ASSETS/aros-rom.bin"
 cp "$WEB/vendor/aros/aros-20260820-ext.bin" "$ASSETS/aros-ext.bin"
+# Fichiers de démarrage WHDLoad d'Amiberry (WHDLoad, boot-data.zip, base des jeux) : le cœur lance alors un .lha seul
+rm -rf "$ROOT/app/src/main/assets/whdboot"
+cp -r "$SRC/whdboot" "$ROOT/app/src/main/assets/whdboot"
 echo "OK : $LIBS/libamiga.so ($(stat -c %s "$LIBS/libamiga.so") octets)"

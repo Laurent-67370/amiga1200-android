@@ -30,6 +30,10 @@ class MainActivity : Activity() {
     private lateinit var hdList: LinearLayout
     private lateinit var presets: LinearLayout
     private lateinit var resumeBtn: Button
+    private lateinit var libList: LinearLayout
+    private lateinit var libTabs: LinearLayout
+    private var libKind = Library.WHD
+    private var libAll = false
     private val switches = mutableListOf<Pair<Switch, () -> Boolean>>()
     private val choices = mutableListOf<Pair<TextView, () -> Boolean>>()
 
@@ -55,6 +59,16 @@ class MainActivity : Activity() {
             presets = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
             c.addView(presets)
             c.addView(note("Un geste règle la machine ; les détails restent modifiables plus bas."))
+        }
+
+        // Bibliothèque
+        card(col, "📚 Bibliothèque") { c ->
+            libTabs = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+            c.addView(libTabs)
+            libList = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(0, dp(6), 0, 0) }
+            c.addView(libList)
+            c.addView(row(button("Ajouter des fichiers…") { pick(REQ_LIB, multiple = true) }))
+            c.addView(note("Jeux WHDLoad (.lha) lancés d'un toucher, disquettes et disques durs retrouvés sans les rechercher. Appui long : retirer de la bibliothèque (le fichier n'est pas effacé)."))
         }
 
         // Kickstart
@@ -115,7 +129,9 @@ class MainActivity : Activity() {
         }
         setContentView(root)
         refresh()
-        if (intent?.getBooleanExtra(EXTRA_RESTART, false) == true) window.decorView.postDelayed({ power() }, 1200)
+        if (intent?.getBooleanExtra(EXTRA_RESTART, false) == true) window.decorView.postDelayed({
+            power(intent.getStringExtra(EmuActivity.EXTRA_WHD_URI), intent.getStringExtra(EmuActivity.EXTRA_WHD_NAME))
+        }, 1200)
         else if (!getSharedPreferences("aide", MODE_PRIVATE).getBoolean("vue", false)) {
             getSharedPreferences("aide", MODE_PRIVATE).edit().putBoolean("vue", true).apply()
             window.decorView.post { help() }
@@ -163,11 +179,87 @@ class MainActivity : Activity() {
         resumeBtn.visibility = if (canResume) View.VISIBLE else View.GONE
         if (canResume) resumeBtn.text = "⏯  Reprendre où j'en étais (" +
             java.text.SimpleDateFormat("dd/MM HH:mm", java.util.Locale.FRANCE).format(java.util.Date(rf.lastModified())) + ")"
+        refreshLibrary()
         for ((sw, get) in switches) sw.isChecked = get()
         for ((v, on) in choices) {
             v.background = rounded(if (on()) ACCENT else CHIP)
             v.setTextColor(if (on()) Color.WHITE else Color.rgb(220, 220, 225))
         }
+    }
+
+    // ---------- bibliothèque ----------
+    private fun refreshLibrary() {
+        val items = Library.all(this)
+        libTabs.removeAllViews()
+        for ((kind, label) in listOf(Library.WHD to "🎮 Jeux", Library.FLOPPY to "💾 Disquettes", Library.HDF to "🗄 Disques durs")) {
+            val n = items.count { it.kind == kind }
+            libTabs.addView(TextView(this).apply {
+                text = if (n > 0) "$label ($n)" else label; textSize = 13f; gravity = Gravity.CENTER
+                setPadding(dp(8), dp(6), dp(8), dp(6))
+                background = rounded(if (kind == libKind) ACCENT else CHIP, 16)
+                setTextColor(Color.WHITE)
+                setOnClickListener { libKind = kind; libAll = false; refreshLibrary() }
+            }, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f).apply { marginEnd = dp(4) })
+        }
+        libList.removeAllViews()
+        val shown = items.filter { it.kind == libKind }
+        if (shown.isEmpty()) {
+            libList.addView(TextView(this).apply {
+                alpha = 0.7f
+                text = when (libKind) {
+                    Library.WHD -> "Aucun jeu. Ajoutez des archives WHDLoad (.lha) : un toucher les lance, sans disque dur à préparer."
+                    Library.FLOPPY -> "Aucune disquette (ADF, DMS, IPF…)."
+                    else -> "Aucun disque dur (.hdf)."
+                }
+            })
+            return
+        }
+        for (it in if (libAll) shown else shown.take(8)) {
+            libList.addView(LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(0, dp(2), 0, dp(2))
+                addView(TextView(this@MainActivity).apply { text = it.name.substringBeforeLast('.'); textSize = 15f }, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f))
+                when (it.kind) {
+                    Library.WHD -> addView(chip("▶ Jouer") { playWhd(it) })
+                    Library.FLOPPY -> addView(chip("DF0:") { useFloppy(it) })
+                    else -> addView(chip(if (s.hds.any { h -> h.uri == it.uri }) "✓ branché" else "+ Brancher") { useHdf(it) })
+                }
+                setOnLongClickListener { _ ->
+                    AlertDialog.Builder(this@MainActivity).setTitle(it.name).setMessage("Retirer de la bibliothèque ? Le fichier lui-même n'est pas effacé.")
+                        .setPositiveButton("Retirer") { _, _ -> Library.remove(this@MainActivity, it.uri); refreshLibrary() }
+                        .setNegativeButton("Annuler", null).show()
+                    true
+                }
+            })
+        }
+        if (!libAll && shown.size > 8) libList.addView(chip("Tout afficher (${shown.size})") { libAll = true; refreshLibrary() })
+    }
+
+    /** Jeu WHDLoad : il faut un vrai Kickstart (avec AROS, WHDLoad s'arrête) */
+    private fun playWhd(it: LibItem) {
+        if (!userRom()) {
+            AlertDialog.Builder(this).setTitle("Kickstart nécessaire")
+                .setMessage("WHDLoad a besoin d'un vrai Kickstart (3.1 de l'A1200 de préférence) : AROS ne lui suffit pas. Choisissez votre fichier ROM dans la carte Kickstart.")
+                .setPositiveButton("Choisir…") { _, _ -> pick(REQ_ROM) }.setNegativeButton("Annuler", null).show()
+            return
+        }
+        Library.touch(this, it.uri)
+        power(it.uri, it.name)
+    }
+
+    private fun useFloppy(it: LibItem) {
+        Library.touch(this, it.uri)
+        s.df0 = it.uri; s.df0Name = it.name; profile(); refresh()
+        toast("DF0: ${it.name}")
+    }
+
+    private fun useHdf(it: LibItem) {
+        val list = s.hds.toMutableList()
+        if (list.any { h -> h.uri == it.uri }) { s.hds = list.filter { h -> h.uri != it.uri }; refresh(); return }
+        if (list.size >= 8) { toast("8 disques durs au plus"); return }
+        Library.touch(this, it.uri)
+        list += Hd(it.uri, it.name)
+        list.sortBy { h -> if (h.name.equals("Workbench.hdf", true)) 0 else 1 }
+        s.hds = list; profile(); refresh()
     }
 
     // ---------- aide ----------
@@ -207,6 +299,15 @@ class MainActivity : Activity() {
     override fun onActivityResult(req: Int, res: Int, data: Intent?) {
         super.onActivityResult(req, res, data)
         if (res != RESULT_OK || data == null) return
+        if (req == REQ_LIB) {
+            val uris = data.clipData?.let { c -> (0 until c.itemCount).map { c.getItemAt(it).uri } } ?: listOfNotNull(data.data)
+            var last = Library.WHD
+            for (u in uris) { keep(u); val n = Disks.displayName(this, u); Library.add(this, u.toString(), n); last = Library.kindOf(n) }
+            libKind = last
+            toast("${uris.size} fichier${if (uris.size > 1) "s" else ""} ajouté${if (uris.size > 1) "s" else ""} à la bibliothèque")
+            refresh()
+            return
+        }
         if (req == REQ_HD) {
             // Un ou plusieurs disques, ajoutés à la suite (8 au plus)
             val uris = data.clipData?.let { c -> (0 until c.itemCount).map { c.getItemAt(it).uri } } ?: listOfNotNull(data.data)
@@ -214,7 +315,9 @@ class MainActivity : Activity() {
             for (u in uris) {
                 if (list.size >= 8) { toast("8 disques durs au plus"); break }
                 keep(u)
-                if (list.none { it.uri == u.toString() }) list += Hd(u.toString(), Disks.displayName(this, u))
+                val n = Disks.displayName(this, u)
+                Library.add(this, u.toString(), n)
+                if (list.none { it.uri == u.toString() }) list += Hd(u.toString(), n)
             }
             // Le Workbench d'AGS démarre : placé en premier s'il vient d'être ajouté
             list.sortBy { if (it.name.equals("Workbench.hdf", true)) 0 else 1 }
@@ -230,7 +333,12 @@ class MainActivity : Activity() {
                 if (Disks.copy(this, uri, File(Config.sysDir(this), "kick.rom"))) { s.rom = "user"; s.romName = name }
                 else toast("Lecture du Kickstart impossible")
             }
-            REQ_DF0 -> { keep(uri); s.df0 = uri.toString(); s.df0Name = name; profile() }
+            REQ_DF0 -> {
+                keep(uri); Library.add(this, uri.toString(), name)
+                // Une archive WHDLoad choisie comme disquette : elle se lance comme un jeu
+                if (Library.kindOf(name) == Library.WHD) { libKind = Library.WHD; refresh(); playWhd(Library.all(this).first { it.uri == uri.toString() }); return }
+                s.df0 = uri.toString(); s.df0Name = name; profile()
+            }
         }
         refresh()
     }
@@ -246,8 +354,10 @@ class MainActivity : Activity() {
         catch (_: Exception) { try { contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION) } catch (_: Exception) {} }
     }
 
-    private fun power() {
-        startActivity(Intent(this, EmuActivity::class.java))
+    private fun power(whdUri: String? = null, whdName: String? = null) {
+        startActivity(Intent(this, EmuActivity::class.java).apply {
+            if (whdUri != null) { putExtra(EmuActivity.EXTRA_WHD_URI, whdUri); putExtra(EmuActivity.EXTRA_WHD_NAME, whdName) }
+        })
     }
 
     override fun onResume() {
@@ -259,7 +369,9 @@ class MainActivity : Activity() {
     /** Redémarrage demandé par l'émulation (« Réinitialiser ») : rallumage une fois son ancien processus terminé */
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
-        if (intent.getBooleanExtra(EXTRA_RESTART, false)) window.decorView.postDelayed({ power() }, 1200)
+        if (intent.getBooleanExtra(EXTRA_RESTART, false)) window.decorView.postDelayed({
+            power(intent.getStringExtra(EmuActivity.EXTRA_WHD_URI), intent.getStringExtra(EmuActivity.EXTRA_WHD_NAME))
+        }, 1200)
     }
 
     // ---------- éléments d'interface ----------
@@ -316,6 +428,7 @@ class MainActivity : Activity() {
         const val REQ_ROM = 1
         const val REQ_DF0 = 2
         const val REQ_HD = 3
+        const val REQ_LIB = 4
         const val EXTRA_RESTART = "rallumer"
         private val ACCENT = Color.rgb(230, 92, 30)
         private val BG = Color.rgb(20, 22, 28)

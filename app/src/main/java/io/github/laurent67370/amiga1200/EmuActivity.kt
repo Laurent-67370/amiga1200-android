@@ -130,9 +130,29 @@ class EmuActivity : Activity(), SurfaceHolder.Callback {
     // ---------- démarrage ----------
     private fun logFile() = File(filesDir, "journal.txt")
 
+    /** Jeu WHDLoad lancé depuis la Bibliothèque (archive .lha) : le cœur le monte et le démarre lui-même */
+    private val whdUri get() = intent.getStringExtra(EXTRA_WHD_URI)
+    private val whdName get() = intent.getStringExtra(EXTRA_WHD_NAME) ?: "jeu.lha"
+
     private fun boot() {
         Native.setLogFile(logFile().path)
         Native.log("amiga1200-android ${BuildConfig.VERSION_NAME}, Android ${Build.VERSION.RELEASE}, ${Build.MANUFACTURER} ${Build.MODEL}")
+        val content = whdUri?.let { uri ->
+            // WHDLoad : fichiers de démarrage d'Amiberry, réglages du jeu tirés de sa base, Kickstart reconnu dans files/sys
+            WhdBoot.ensure(this)
+            Native.log("WHDLoad : $whdName")
+            Disks.link(this, uri, Disks.safe(whdName)) ?: run { fail("le jeu $whdName est illisible, choisissez-le à nouveau"); return }
+        } ?: machineConfig()
+        Native.setDirs(Config.sysDir(this).path, Config.saveDir(this).path)
+        // Options du cœur : celles de la version web (cadrage automatique, pas de barre d'état, manette 0 au port joystick)
+        Native.setOption("amiberry_crop_overscan", "enabled")
+        Native.setOption("amiberry_statusline", "disabled")
+        Native.setOption("amiberry_joyport_order", "21")
+        startCore(content)
+    }
+
+    /** Machine de l'écran d'accueil : disquettes, disques durs, SHARED:, écrite en configuration .uae */
+    private fun machineConfig(): String {
         val df0 = Disks.link(this, s.df0, s.df0Name)
         if (s.df0.isNotEmpty() && df0 == null) toast("Disquette ${s.df0Name} : accès refusé, choisissez-la à nouveau")
         val df1 = Disks.link(this, s.df1, "df1-${s.df1Name}")
@@ -142,13 +162,11 @@ class EmuActivity : Activity(), SurfaceHolder.Callback {
             Disks.link(this, h.uri, "dh$i-${h.name}").also { if (it == null) toast("Disque dur ${h.name} : accès refusé, choisissez-le à nouveau") }
         }
         val shared = if (hds.isNotEmpty() && s.shared) Config.sharedDir(this) else null
-        val cfg = Config.write(this, s, df0, df1, hds, shared)
-        Native.setDirs(Config.sysDir(this).path, Config.saveDir(this).path)
-        // Options du cœur : celles de la version web (cadrage automatique, pas de barre d'état, manette 0 au port joystick)
-        Native.setOption("amiberry_crop_overscan", "enabled")
-        Native.setOption("amiberry_statusline", "disabled")
-        Native.setOption("amiberry_joyport_order", "21")
-        if (!Native.start(cfg.path)) { fail("le fil de l'émulation n'a pas pu démarrer"); return }
+        return Config.write(this, s, df0, df1, hds, shared).path
+    }
+
+    private fun startCore(content: String) {
+        if (!Native.start(content)) { fail("le fil de l'émulation n'a pas pu démarrer"); return }
         val t0 = System.currentTimeMillis()
         ui.post(object : Runnable {
             override fun run() {
@@ -247,7 +265,7 @@ class EmuActivity : Activity(), SurfaceHolder.Callback {
             add(0, 12, 0, "Journal (diagnostic)")
             add(0, 15, 0, "Aide")
         }
-        if (s.model == "A1200") mm.add(0, 17, 0, if (s.jit) "⚡  Redémarrer sans JIT (démos)" else "⚡  Redémarrer avec le JIT")
+        if (s.model == "A1200" && whdUri == null) mm.add(0, 17, 0, if (s.jit) "⚡  Redémarrer sans JIT (démos)" else "⚡  Redémarrer avec le JIT")
         mm.add(0, 10, 0, "↺  Réinitialiser l'Amiga")
         mm.add(0, 11, 0, "⏻  Éteindre")
         m.setOnMenuItemClickListener {
@@ -429,13 +447,14 @@ class EmuActivity : Activity(), SurfaceHolder.Callback {
         startActivity(Intent(this, MainActivity::class.java).apply {
             addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
             putExtra(MainActivity.EXTRA_RESTART, true)
+            whdUri?.let { putExtra(EXTRA_WHD_URI, it); putExtra(EXTRA_WHD_NAME, whdName) }
         })
         quit()
     }
 
     /** Extinction : l'état est gardé pour « Reprendre où j'en étais » (une seule fois, avec les mêmes disques) */
     private fun powerOff() {
-        if (!running) { quit(); return }
+        if (!running || whdUri != null) { quit(); return }  // jeu WHDLoad : ses sauvegardes sont dans WHDSaves
         setPaused(true)
         toastShort("Extinction…")
         Thread {
@@ -613,6 +632,8 @@ class EmuActivity : Activity(), SurfaceHolder.Callback {
     private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
     companion object {
         const val EXTRA_RESUME = "reprendre"
+        const val EXTRA_WHD_URI = "whd"
+        const val EXTRA_WHD_NAME = "whdNom"
     }
     private fun toast(t: String) = Toast.makeText(this, t, Toast.LENGTH_LONG).show()
     private fun toastShort(t: String) = Toast.makeText(this, t, Toast.LENGTH_SHORT).show()

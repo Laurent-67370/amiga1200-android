@@ -19,6 +19,9 @@ les réglages.
 
 ## Ce que fait le prototype
 
+- **Jeux WHDLoad en un geste** : une archive `.lha` de la Bibliothèque se lance d'un toucher. Le cœur Amiberry monte
+  le jeu, applique ses réglages (base de jeux d'Amiberry) et garde ses sauvegardes. Il faut un vrai Kickstart.
+- **Bibliothèque** : jeux WHDLoad, disquettes et disques durs déjà choisis, retrouvés d'un toucher (lus sur place).
 - **Kickstart** : vous choisissez le vôtre (copié dans l'application). Sinon, la ROM libre **AROS** est fournie.
 - **Machines** : Amiga 1200 et Amiga 500.
 - **JIT** (A1200) : 68040 avec FPU, vitesse maximale et 64 Mo de mémoire Fast Zorro III. Désactivez-le pour
