@@ -147,6 +147,17 @@ class MainActivity : Activity() {
             addView(resumeBtn, LinearLayout.LayoutParams(MATCH_PARENT, dp(52)).apply { setMargins(dp(14), dp(6), dp(14), 0) })
             addView(power, LinearLayout.LayoutParams(MATCH_PARENT, dp(60)).apply { setMargins(dp(14), dp(6), dp(14), dp(14)) })
         }
+        // Android 15 et plus dessinent sous les barres du système : l'accueil s'en écarte (heure en haut, boutons en bas)
+        root.setOnApplyWindowInsetsListener { v, insets ->
+            if (android.os.Build.VERSION.SDK_INT >= 30) {
+                val b = insets.getInsets(android.view.WindowInsets.Type.systemBars() or android.view.WindowInsets.Type.displayCutout())
+                v.setPadding(b.left, b.top, b.right, b.bottom)
+            } else {
+                @Suppress("DEPRECATION")
+                v.setPadding(insets.systemWindowInsetLeft, insets.systemWindowInsetTop, insets.systemWindowInsetRight, insets.systemWindowInsetBottom)
+            }
+            insets
+        }
         setContentView(root)
         refresh()
         if (intent?.getBooleanExtra(EXTRA_RESTART, false) == true) window.decorView.postDelayed({
