@@ -72,4 +72,7 @@ cp "$WEB/vendor/aros/aros-20260820-ext.bin" "$ASSETS/aros-ext.bin"
 # Fichiers de démarrage WHDLoad d'Amiberry (WHDLoad, boot-data.zip, base des jeux) : le cœur lance alors un .lha seul
 rm -rf "$ROOT/app/src/main/assets/whdboot"
 cp -r "$SRC/whdboot" "$ROOT/app/src/main/assets/whdboot"
+# Bruits des lecteurs de disquettes d'Amiberry (clic de la tête, rotation, insertion), comme la version web
+rm -rf "$ROOT/app/src/main/assets/floppy_sounds"
+cp -r "$SRC/data/floppy_sounds" "$ROOT/app/src/main/assets/floppy_sounds"
 echo "OK : $LIBS/libamiga.so ($(stat -c %s "$LIBS/libamiga.so") octets)"

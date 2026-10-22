@@ -30,6 +30,8 @@ class MainActivity : Activity() {
     private lateinit var cd32Text: TextView
     private lateinit var cdText: TextView
     private lateinit var cfgList: LinearLayout
+    private lateinit var midiText: TextView
+    private lateinit var midiBox: LinearLayout
     private lateinit var hdList: LinearLayout
     private lateinit var presets: LinearLayout
     private lateinit var resumeBtn: Button
@@ -119,6 +121,16 @@ class MainActivity : Activity() {
             c.addView(switch("Image étirée sur toute la largeur", { s.fill }) { s.fill = it })
             c.addView(row(button("Réglages des commandes…") { ControlsDialog.show(this, s) }))
         }
+        // Son et MIDI
+        card(col, "🔊 Son et MIDI") { c ->
+            c.addView(switch("Bruit des lecteurs de disquettes", { s.floppySound }) { s.floppySound = it })
+            c.addView(switch("MIDI sur le port série", { s.midi }) { s.midi = it })
+            midiBox = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+            midiText = TextView(this).also { midiBox.addView(it) }
+            midiBox.addView(row(button("Sortie…") { midiChoose(true) }, button("Entrée…") { midiChoose(false) }))
+            midiBox.addView(note("L'Amiga joue sur un synthétiseur USB ou Bluetooth, ou sur une application de synthé d'Android ; un clavier MIDI peut jouer sur l'Amiga (Bars & Pipes, Music-X, OctaMED…)."))
+            c.addView(midiBox)
+        }
         // Configurations
         card(col, "🗂 Configurations") { c ->
             cfgList = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
@@ -194,6 +206,8 @@ class MainActivity : Activity() {
             else "Aucune : la CD32 a besoin de sa ROM (kick40060.CD32 + extension, ou ROM complète de 1 Mo)."
         cdText.text = s.cdName.ifEmpty { "aucun" }
         summary.text = parts.joinToString(" · ")
+        midiBox.visibility = if (s.midi) View.VISIBLE else View.GONE
+        midiText.text = "Sortie : ${s.midiOut.ifEmpty { "premier appareil trouvé" }}\nEntrée : ${s.midiIn.ifEmpty { "aucune" }}"
 
         romText.text = if (userRom()) "✓ ${s.romName}" else "AROS, ROM libre fournie. Pour les jeux et AGS, choisissez votre Kickstart 3.1 (A1200) ou 1.3 (A500)."
         df0Text.text = s.df0Name.ifEmpty { "vide" }
@@ -458,6 +472,20 @@ class MainActivity : Activity() {
     private fun keep(uri: Uri) {
         try { contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION) }
         catch (_: Exception) { try { contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION) } catch (_: Exception) {} }
+    }
+
+    /** Appareil MIDI : sortie (ce que joue l'Amiga) ou entrée (clavier qui joue sur l'Amiga) */
+    private fun midiChoose(output: Boolean) {
+        val names = MidiLink.names(this, output)
+        val items = listOf(if (output) "Premier appareil trouvé" else "Aucune") + names
+        android.app.AlertDialog.Builder(this).setTitle(if (output) "Sortie MIDI" else "Entrée MIDI")
+            .setItems(items.toTypedArray()) { _, i ->
+                val v = if (i == 0) "" else names[i - 1]
+                if (output) s.midiOut = v else s.midiIn = v
+                refresh()
+            }
+            .apply { if (names.isEmpty()) setMessage("Aucun appareil MIDI branché. Branchez un instrument USB ou Bluetooth, ou installez une application de synthé MIDI.") }
+            .setNegativeButton("Annuler", null).show()
     }
 
     private fun power(whdUri: String? = null, whdName: String? = null) {

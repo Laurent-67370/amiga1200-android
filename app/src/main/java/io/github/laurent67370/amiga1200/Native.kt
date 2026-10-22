@@ -43,4 +43,15 @@ object Native {
     external fun videoW(): Int
     external fun videoH(): Int
     external fun led(index: Int): Int
+
+    /** Dossier courant du cœur : il y cherche data/floppy_sounds */
+    external fun setHome(path: String): Boolean
+    /** Bruits des lecteurs de disquettes, à chaud */
+    external fun floppySound(on: Boolean)
+
+    /** MIDI du port série : sortie (l'Amiga joue) et entrée (un clavier joue sur l'Amiga) */
+    external fun midiEnable(out: Boolean, input: Boolean)
+    /** Octets envoyés par l'Amiga depuis le dernier appel */
+    external fun midiRead(dst: ByteArray): Int
+    external fun midiWrite(src: ByteArray, offset: Int, length: Int)
 }

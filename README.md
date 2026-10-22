@@ -56,6 +56,11 @@ les réglages.
   l'écran, tir 1 et 2 échangés, bouton B = haut (sauter). **Deux manettes** : la seconde joue sur le port souris.
 - **Rapport de plantage** : si l'émulation s'arrête brutalement, l'écran des réglages propose de partager un rapport
   (pile d'appels du cœur et fin du journal).
+- **Bruit des lecteurs de disquettes** (clic de la tête, rotation, insertion), comme sur un vrai Amiga : accueil
+  → Son et MIDI, ou menu → Avancé en cours de partie.
+- **MIDI** sur le port série de l'Amiga (Bars & Pipes, Music-X, OctaMED, jeux qui parlent MIDI) : l'Amiga joue sur un
+  synthétiseur USB ou Bluetooth, ou sur une application de synthé d'Android, et un clavier MIDI peut jouer sur l'Amiga.
+- **Icône adaptative**, monochrome sur Android 13 et plus (icônes à thème).
 - **Mesure de vitesse** : le coin de l'écran affiche les images par seconde, le pourcentage du temps réel et
   le temps de calcul d'une image. Le **Turbo** (menu) fait tourner l'Amiga sans frein : comparez les images par
   seconde avec et sans JIT.
@@ -67,7 +72,7 @@ les réglages.
 | Cœur Amiberry 8.3 (WinUAE 6) | `BlitterStudio/amiberry`, même version que la version web, Makefile libretro `platform=android-arm64` (JIT ARM64 compris) |
 | Correctifs du cœur | `native/patches/` : touches manquantes, manette CD32, mémoire RTG dans les sauvegardes d'état, cadence laissée au frontal |
 | Frontal libretro | `amiga1200/wasm/frontend.c` (sous-module **amiga1200**, le dépôt de la version web), compilé tel quel ; `native/compat/` remplace les trois fonctions d'Emscripten qu'il utilise |
-| Pont Android | `native/jni_bridge.c` : image copiée dans la surface Android, son par AAudio, appels Kotlin |
+| Pont Android | `native/jni_bridge.c` : image copiée dans la surface Android, son par AAudio, MIDI, appels Kotlin |
 | Application | `app/` : Kotlin, sans bibliothèque externe |
 
 L'APK est compilé par GitHub Actions (`.github/workflows/android.yml`). Les étapes sont : NDK → `native/build-core.sh`
@@ -82,8 +87,19 @@ ANDROID_NDK_ROOT=~/Android/Sdk/ndk/<version> native/build-core.sh
 gradle assembleRelease      # Gradle 8.14, JDK 17
 ```
 
-L'APK est signé avec une clé de test publique (`app/debug.keystore`, mot de passe `android`). C'est voulu :
-chaque compilation s'installe ainsi par-dessus la précédente. Une clé privée la remplacera avant toute publication.
+Gradle signe l'APK avec une clé de test publique (`app/debug.keystore`, mot de passe `android`). Si le dépôt a une
+**clé de publication** dans ses secrets (Settings → Secrets and variables → Actions), `scripts/sign-apk.sh` signe
+ensuite l'APK avec elle :
+
+| Secret | Contenu |
+|---|---|
+| `SIGNING_KEYSTORE_B64` | magasin de clés PKCS12 en base64 (alias `amiga1200`) |
+| `SIGNING_PASSWORD` | son mot de passe |
+
+La clé de test passe alors le relais à la clé de publication (rotation de clé, signature APK v3). Le nouvel APK
+s'installe donc par-dessus les versions de test, sans désinstaller et sans perdre les réglages ni les sauvegardes. La
+clé de publication ne doit jamais entrer dans le dépôt : gardez-en une copie, car sans elle aucune mise à jour ne
+pourra plus s'installer.
 
 ## Feuille de route
 
@@ -91,7 +107,7 @@ chaque compilation s'installe ainsi par-dessus la précédente. Une clé privée
 2. **Interface de la version web** dans une WebView, reliée au cœur natif : Bibliothèque, configurations,
    aide, réglages, tout ce qui existe déjà.
 3. **Disques** : WHDLoad en un geste, CD32, Bibliothèque.
-4. **Finitions** : icône adaptative, clé de signature, publication.
+4. **Finitions** : icône adaptative et clé de signature (faites), publication.
 
 ## Licences
 

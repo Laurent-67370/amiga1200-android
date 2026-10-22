@@ -8,3 +8,6 @@ native/out/
 app/src/main/jniLibs/
 app/src/main/assets/aros/
 app/src/main/assets/whdboot/
+app/src/main/assets/floppy_sounds/
+*.p12
+*.jks
