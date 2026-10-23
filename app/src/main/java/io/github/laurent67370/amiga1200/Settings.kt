@@ -146,6 +146,9 @@ class Settings(ctx: Context) {
     /** Signature de la configuration : la reprise n'est proposée qu'avec la même machine et les mêmes disques */
     fun signature() = listOf(model, jit, rtg, ntsc, rom, romName, df0, df1, df2, df3, cd, hds.joinToString("|") { it.uri }).joinToString("#")
     var resumeSig: String get() = str("resumeSig", ""); set(v) = put("resumeSig", v)
+    /** Jeu lancé directement dont l'état est gardé : « whd » ou « hdf », son document et son nom (lignes) ; vide pour
+     *  la machine de l'accueil */
+    var resumeGame: String get() = str("resumeGame", ""); set(v) = put("resumeGame", v)
 }
 
 /** Fichiers choisis par l'utilisateur (Storage Access Framework). */

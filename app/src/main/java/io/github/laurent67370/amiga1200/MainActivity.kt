@@ -169,7 +169,7 @@ class MainActivity : Activity() {
         resumeBtn = Button(this).apply {
             textSize = 17f; setTextColor(Color.WHITE); isAllCaps = false
             background = GradientDrawable().apply { cornerRadius = dp(14).toFloat(); setColor(CHIP) }
-            setOnClickListener { startActivity(Intent(this@MainActivity, EmuActivity::class.java).putExtra(EmuActivity.EXTRA_RESUME, true)) }
+            setOnClickListener { resumeGame() }
         }
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL; setBackgroundColor(BG)
@@ -290,9 +290,12 @@ class MainActivity : Activity() {
             preset("Amiga 500", "jeux et démos OCS", a500) { s.model = "A500"; s.jit = false; s.rtg = false },
             preset("CD32", "jeux sur CD", cd32) { s.model = "CD32" }))
         val rf = Config.resumeFile(this)
-        val canResume = rf.exists() && s.resumeSig == s.signature()
+        // Un jeu lancé directement se reprend quels que soient les réglages de l'accueil ; la machine de l'accueil,
+        // seulement avec les mêmes disques et la même machine
+        val game = s.resumeGame.split("\n").takeIf { it.size == 3 }
+        val canResume = rf.exists() && (game != null || s.resumeSig == s.signature())
         resumeBtn.visibility = if (canResume) View.VISIBLE else View.GONE
-        if (canResume) resumeBtn.text = "⏯  Reprendre où j'en étais (" +
+        if (canResume) resumeBtn.text = "⏯  Reprendre " + (game?.let { it[2].substringBeforeLast('.') + " " } ?: "où j'en étais ") + "(" +
             java.text.SimpleDateFormat("dd/MM HH:mm", java.util.Locale.FRANCE).format(java.util.Date(rf.lastModified())) + ")"
         refreshLibrary()
         refreshConfigs()
@@ -442,6 +445,17 @@ class MainActivity : Activity() {
         if (!whdKickstart()) return
         Library.touch(this, it.uri)
         startActivity(Intent(this, EmuActivity::class.java).putExtra(EmuActivity.EXTRA_HDF_URI, it.uri).putExtra(EmuActivity.EXTRA_HDF_NAME, it.name))
+    }
+
+    /** « Reprendre où j'en étais » : la machine de l'accueil, ou le jeu lancé directement (WHDLoad, .hdf) */
+    private fun resumeGame() {
+        val i = Intent(this, EmuActivity::class.java).putExtra(EmuActivity.EXTRA_RESUME, true)
+        val g = s.resumeGame.split("\n")
+        if (g.size == 3) when (g[0]) {
+            "whd" -> i.putExtra(EmuActivity.EXTRA_WHD_URI, g[1]).putExtra(EmuActivity.EXTRA_WHD_NAME, g[2])
+            "hdf" -> i.putExtra(EmuActivity.EXTRA_HDF_URI, g[1]).putExtra(EmuActivity.EXTRA_HDF_NAME, g[2])
+        }
+        startActivity(i)
     }
 
     private fun relaunchHdf(uri: String, name: String?) =

@@ -297,6 +297,27 @@ class EmuActivity : Activity(), SurfaceHolder.Callback {
         Native.pause(true)
     }
 
+    /** Application quittée sans éteindre (bouton Accueil, autre application) : l'état est gardé, pour que l'accueil
+     *  propose de reprendre si Android termine l'émulation entre-temps */
+    override fun onStop() {
+        super.onStop()
+        if (running && !quitting && !isChangingConfigurations) Thread { saveResume() }.start()
+    }
+
+    /** État de « Reprendre où j'en étais », avec ce qu'il faut pour rallumer la même chose (machine ou jeu) */
+    private fun saveResume(): Boolean {
+        val ok = Native.saveState(Config.resumeFile(this).path)
+        if (ok) {
+            s.resumeSig = s.signature()
+            s.resumeGame = when {
+                whdUri != null -> "whd\n$whdUri\n$whdName"
+                hdfUri != null -> "hdf\n$hdfUri\n$hdfName"
+                else -> ""
+            }
+        }
+        return ok
+    }
+
     override fun onResume() {
         super.onResume()
         immersive()
@@ -648,12 +669,12 @@ class EmuActivity : Activity(), SurfaceHolder.Callback {
     /** Extinction : l'état est gardé pour « Reprendre où j'en étais » (une seule fois, avec les mêmes disques) */
     private fun powerOff() {
         if (running) capture(manual = false)   // image du jeu pour la Bibliothèque, s'il n'en a pas
-        if (!running || gameFile != null) { quit(); return }  // jeu WHDLoad : ses sauvegardes sont sur son disque
+        if (!running) { quit(); return }
         setPaused(true)
         toastShort("Extinction…")
         Thread {
-            val ok = Native.saveState(Config.resumeFile(this).path)
-            ui.post { if (ok) s.resumeSig = s.signature(); quit() }
+            saveResume()
+            ui.post { quit() }
         }.start()
     }
 
