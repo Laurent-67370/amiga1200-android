@@ -110,6 +110,9 @@ ensuite l'APK avec elle :
 | `SIGNING_KEYSTORE_B64` | magasin de clés PKCS12 en base64 (alias `amiga1200`) |
 | `SIGNING_PASSWORD` | son mot de passe |
 
+C'est le cas depuis la compilation 50 : l'APK publié est signé avec la clé de publication (empreinte SHA-256
+`0F:FD:CF:CB:C3:68:36:4E:C0:44:D9:11:80:D6:AB:F6:3A:7B:4D:A4:9B:E2:52:48:60:F9:95:B6:F7:EB:54:7E`).
+
 La clé de test passe alors le relais à la clé de publication (rotation de clé, signature APK v3). Le nouvel APK
 s'installe donc par-dessus les versions de test, sans désinstaller et sans perdre les réglages ni les sauvegardes. La
 clé de publication ne doit jamais entrer dans le dépôt : gardez-en une copie, car sans elle aucune mise à jour ne
