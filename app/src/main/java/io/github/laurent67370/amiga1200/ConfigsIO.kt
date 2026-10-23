@@ -29,7 +29,8 @@ object ConfigsIO {
         fun find(path: String): LibItem? { val n = path.trim('"').substringAfterLast('/').substringAfterLast('\\'); return lib.firstOrNull { it.name.equals(n, true) } }
         val missing = mutableListOf<String>()
         kv.firstOrNull { it.first == "quickstart" }?.second?.substringBefore(',')?.let { q ->
-            val m = q.uppercase(); if (m in listOf("A500", "A600", "A1200", "A4000", "CD32")) s.model = m
+            val m = q.uppercase(); if (m in listOf("A500", "A600", "A1200", "A3000", "A4000", "CD32", "CDTV")) s.model = m
+            else if (m in listOf("A1000", "A2000", "A500+")) s.model = "A500" else if (m == "A4000T") s.model = "A4000"
         }
         kv.firstOrNull { it.first == "cachesize" }?.let { s.jit = (it.second.toIntOrNull() ?: 0) > 0 }
         s.rtg = kv.any { it.first == "gfxcard_size" && (it.second.toIntOrNull() ?: 0) > 0 }

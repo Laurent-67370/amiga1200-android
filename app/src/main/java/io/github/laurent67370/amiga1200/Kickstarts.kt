@@ -12,31 +12,77 @@ data class Rom(val file: File, val crc: Long, val version: Int, val revision: In
     val label: String get() = known?.label ?: if (version > 0) "Kickstart ${Kickstarts.family(version)} ($version.$revision)" else "Kickstart (${file.length() / 1024} Ko)"
     /** Machines pour lesquelles cette ROM est faite, quand elle est connue */
     val models: Set<String> get() = known?.models ?: emptySet()
+    /** ROM d'extension du CDTV (jamais un Kickstart à elle seule) */
+    val cdtvExt: Boolean get() = known?.cdtvExt == true
 }
 
 /** Plusieurs Kickstart : chacun est choisi automatiquement pour la machine qui lui convient (1.3 pour l'Amiga 500,
  *  3.1 pour l'A1200…). Ils sont rangés dans files/sys, où le cœur les retrouve aussi pour WHDLoad. */
 object Kickstarts {
-    class Known(val label: String, val models: Set<String>)
+    class Known(val label: String, val models: Set<String>, val cdtvExt: Boolean = false)
 
-    /** ROM de Commodore les plus courantes (somme CRC32 du fichier) */
+    private fun k(label: String, vararg models: String) = Known(label, models.toSet())
+
+    /** ROM de Commodore et d'Hyperion (somme CRC32 du fichier), d'après la table d'Amiberry comme la version web.
+     *  « A500 » couvre aussi l'A1000, l'A2000, l'A500+ et le CDTV ; « A4000 » l'A4000T. */
     val known: Map<Long, Known> = mapOf(
-        0xA6CE1636L to Known("Kickstart 1.2 (A500)", setOf("A500")),
-        0xC4F0F55FL to Known("Kickstart 1.3 (A500)", setOf("A500")),
-        0xC3BDB240L to Known("Kickstart 2.04 (A500+)", setOf("A500")),
-        0x83028FB5L to Known("Kickstart 2.05 (A600)", setOf("A600")),
-        0x64466C2AL to Known("Kickstart 2.05 (A600HD)", setOf("A600")),
-        0x43B0DF7BL to Known("Kickstart 2.05 (A600HD)", setOf("A600")),
-        0x6C9B07D2L to Known("Kickstart 3.0 (A1200)", setOf("A1200")),
-        0x9E6AC152L to Known("Kickstart 3.0 (A4000)", setOf("A4000")),
-        0xFC24AE0DL to Known("Kickstart 3.1 (A500, A600, A2000)", setOf("A500", "A600")),
-        0x1483A091L to Known("Kickstart 3.1 (A1200)", setOf("A1200")),
-        0xD6BAE334L to Known("Kickstart 3.1 (A4000)", setOf("A4000")),
-        0x2B4566F1L to Known("Kickstart 3.1 (A4000)", setOf("A4000")),
-        0xEFB239CCL to Known("Kickstart 3.1 (A3000)", setOf("A4000")),
+        0xA6CE1636L to k("Kickstart 1.2 (A500)", "A500"),
+        0xC4F0F55FL to k("Kickstart 1.3 (A500)", "A500"),
+        0xE0F37258L to k("Kickstart 1.3 (A3000)", "A3000"),
+        0xBC0EC13FL to k("Kickstart 1.4 (A3000)", "A3000"),
+        0xC3BDB240L to k("Kickstart 2.04 (A500+)", "A500"),
+        0x234A7233L to k("Kickstart 2.04 (A3000)", "A3000"),
+        0x83028FB5L to k("Kickstart 2.05 (A600)", "A600"),
+        0x64466C2AL to k("Kickstart 2.05 (A600HD)", "A600"),
+        0x43B0DF7BL to k("Kickstart 2.05 (A600HD)", "A600"),
+        0x6C9B07D2L to k("Kickstart 3.0 (A1200)", "A1200"),
+        0x9E6AC152L to k("Kickstart 3.0 (A4000)", "A4000"),
+        0xFC24AE0DL to k("Kickstart 3.1 (A500, A600, A2000)", "A500", "A600"),
+        0x1483A091L to k("Kickstart 3.1 (A1200)", "A1200"),
+        0xEFB239CCL to k("Kickstart 3.1 (A3000)", "A3000"),
+        0xD6BAE334L to k("Kickstart 3.1 (A4000)", "A4000"),
+        0x2B4566F1L to k("Kickstart 3.1 (A4000)", "A4000"),
+        0x43B6DD22L to k("Kickstart 3.1 (A4000)", "A4000"),
+        0x75932C3AL to k("Kickstart 3.1 (A4000T)", "A4000"),
+        0x3AC99EDCL to k("Kickstart 3.X (A4000)", "A4000"),
+        0xD52B52FDL to k("Kickstart 3.1.4 (A500, A600, A2000)", "A500", "A600"),
+        0xF17FA97FL to k("Kickstart 3.1.4 (A1200)", "A1200"),
+        0x50C3529CL to k("Kickstart 3.1.4 (A3000)", "A3000"),
+        0xD47E18FDL to k("Kickstart 3.1.4 (A4000)", "A4000"),
+        0x75A2B2A5L to k("Kickstart 3.1.4 (A4000T)", "A4000"),
+        0x568F8786L to k("Kickstart 3.1.4.2 (A500, A600, A2000)", "A500", "A600"),
+        0xB87506A7L to k("Kickstart 3.1.4.2 (A1200)", "A1200"),
+        0xBA35F8EBL to k("Kickstart 3.1.4.2 (A3000)", "A3000"),
+        0x1B84CB33L to k("Kickstart 3.1.4.2 (A4000)", "A4000"),
+        0xD6D0EF3EL to k("Kickstart 3.1.4.2 (A4000T)", "A4000"),
+        0x8173D7B6L to k("Kickstart 3.2 (A500, A600, A2000)", "A500", "A600"),
+        0xBD1FF75EL to k("Kickstart 3.2 (A1200)", "A1200"),
+        0xF3AF46CCL to k("Kickstart 3.2 (A3000)", "A3000"),
+        0x9BB8FC93L to k("Kickstart 3.2 (A4000)", "A4000"),
+        0x9188A509L to k("Kickstart 3.2 (A4000T)", "A4000"),
+        0x4F078456L to k("Kickstart 3.2.1 (A500, A600, A2000)", "A500", "A600"),
+        0x2B653371L to k("Kickstart 3.2.1 (A1200)", "A1200"),
+        0x0078F607L to k("Kickstart 3.2.1 (A3000)", "A3000"),
+        0xF3CED3B8L to k("Kickstart 3.2.1 (A4000)", "A4000"),
+        0xAF3452ECL to k("Kickstart 3.2.1 (A4000T)", "A4000"),
+        0xE4458462L to k("Kickstart 3.2.2 (A500, A600, A2000)", "A500", "A600"),
+        0x5C40328AL to k("Kickstart 3.2.2 (A1200)", "A1200"),
+        0x46335B57L to k("Kickstart 3.2.2 (A3000)", "A3000"),
+        0x4BEA9798L to k("Kickstart 3.2.2 (A4000)", "A4000"),
+        0x36BBCD8AL to k("Kickstart 3.2.2 (A4000T)", "A4000"),
+        0xE1F50B0BL to k("Kickstart 3.2.3 (A500, A600, A2000)", "A500", "A600"),
+        0xB18D3B67L to k("Kickstart 3.2.3 (A1200)", "A1200"),
+        0x74C0B23FL to k("Kickstart 3.2.3 (A3000)", "A3000"),
+        0xB6A4698EL to k("Kickstart 3.2.3 (A4000)", "A4000"),
+        0x588A5E6DL to k("Kickstart 3.2.3 (A4000T)", "A4000"),
+        // Extension du CDTV : s'ajoute au Kickstart 1.3 de la console
+        0x42BAA124L to Known("Extension du CDTV 1.0", setOf("CDTV"), cdtvExt = true),
+        0xCEAE68D2L to Known("Extension du CDTV 2.7", setOf("CDTV"), cdtvExt = true),
+        0x30B54232L to Known("Extension du CDTV 2.30", setOf("CDTV"), cdtvExt = true),
+        0xAB6274E7L to Known("Extension du CDTV 47.1", setOf("CDTV"), cdtvExt = true),
         // ROM de la CD32 : jamais prise pour un autre Amiga (elle se choisit dans la carte Kickstart → ROM CD32)
-        0x1E62D4A5L to Known("ROM de la CD32", setOf("CD32")),
-        0x87746BE2L to Known("Extension de la CD32", setOf("CD32")),
+        0x1E62D4A5L to k("ROM de la CD32", "CD32"),
+        0x87746BE2L to k("Extension de la CD32", "CD32"),
     )
 
     fun family(version: Int) = when {
@@ -91,23 +137,47 @@ object Kickstarts {
 
     fun remove(rom: Rom) { rom.file.delete() }
 
-    /** Convient-elle à cette machine ? 1.x : Amiga 500 ; 2.0 : A500 et A600 ; 3.x : selon la machine pour laquelle elle est faite */
-    fun fits(r: Rom, model: String): Boolean {
-        if (model in r.models) return true
-        if (r.models.isNotEmpty()) return false
-        val v = r.version
-        return when (model) {
-            "A500" -> v in 30..37 || v >= 39
-            "A600" -> v == 37 || v >= 39
-            "A1200", "A4000" -> v >= 39
-            else -> false
-        }
+    /** ROM faites pour cette machine, par ordre de préférence (l'A3000 et l'A4000 se prêtent leurs ROM ; le CDTV
+     *  démarre sur le Kickstart de l'Amiga 500) */
+    private fun groups(model: String): List<Set<String>> = when (model) {
+        "A3000" -> listOf(setOf("A3000"), setOf("A4000"))
+        "A4000" -> listOf(setOf("A4000"), setOf("A3000"))
+        "CDTV" -> listOf(setOf("A500"))
+        else -> listOf(setOf(model))
     }
 
-    /** Le meilleur Kickstart pour la machine (celui qui lui est destiné, sinon le plus récent qui convient), ou null */
+    /** 0 : ne convient pas ; plus c'est grand, mieux elle convient (ROM connue faite pour la machine en tête) */
+    private fun rank(r: Rom, model: String): Int {
+        if (r.cdtvExt) return 0
+        if (r.models.isNotEmpty()) {
+            val g = groups(model)
+            g.forEachIndexed { i, set -> if (r.models.any { it in set }) return g.size - i + 1 }
+            return 0
+        }
+        // ROM inconnue : d'après sa version. 1.x : Amiga 500 ; 2.0 : A500 et A600 ; 3.x : toutes
+        val v = r.version
+        val ok = when (model) {
+            "A500", "CDTV" -> v in 30..37 || v >= 39
+            "A600" -> v == 37 || v >= 39
+            "A1200", "A3000", "A4000" -> v >= 39
+            else -> false
+        }
+        return if (ok) 1 else 0
+    }
+
+    fun fits(r: Rom, model: String) = rank(r, model) > 0
+
+    /** Le meilleur Kickstart pour la machine (celui qui lui est destiné, sinon le plus récent qui convient ; le 1.3
+     *  d'abord pour le CDTV, celui de la vraie console), ou null */
     fun best(ctx: Context, model: String): Rom? =
-        list(ctx).filter { fits(it, model) }.maxWithOrNull(compareBy<Rom>({ if (model in it.models) 1 else 0 }, { it.version }, { it.revision }))
+        list(ctx).filter { fits(it, model) }.maxWithOrNull(compareBy<Rom>({ rank(it, model) },
+            { if (model == "CDTV" && it.version == 34) 1 else 0 }, { it.version }, { it.revision }))
+
+    /** Extension du CDTV installée, ou null */
+    fun cdtvExt(ctx: Context): Rom? = list(ctx).firstOrNull { it.cdtvExt }
 
     /** WHDLoad a besoin d'un Kickstart 3.x (il choisit lui-même la machine) */
-    fun hasForWhd(ctx: Context) = list(ctx).any { it.version >= 39 || "A1200" in it.models || "A4000" in it.models }
+    fun hasForWhd(ctx: Context) = list(ctx).any {
+        !it.cdtvExt && "CD32" !in it.models && (it.version >= 39 || it.models.any { m -> m in setOf("A1200", "A3000", "A4000") })
+    }
 }

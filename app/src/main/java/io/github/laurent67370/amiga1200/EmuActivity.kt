@@ -187,10 +187,10 @@ class EmuActivity : Activity(), SurfaceHolder.Callback {
             }
         }
         drives = if (floppies.drop(2).any { it != null }) 4 else 2
-        val cd = if (s.model == "CD32") Disks.link(this, s.cd, s.cdName).also {
+        val cd = if (Config.cdConsole(s.model)) Disks.link(this, s.cd, s.cdName).also {
             if (s.cd.isNotEmpty() && it == null) toast("CD ${s.cdName} : accès refusé, choisissez-le à nouveau")
         } else null
-        val hds = if (s.model == "CD32") emptyList() else s.hds.mapIndexedNotNull { i, h ->
+        val hds = if (Config.cdConsole(s.model)) emptyList() else s.hds.mapIndexedNotNull { i, h ->
             // Nom précédé du numéro : deux disques de même nom venant de dossiers différents restent distincts
             Disks.link(this, h.uri, "dh$i-${h.name}").also { if (it == null) toast("Disque dur ${h.name} : accès refusé, choisissez-le à nouveau") }
         }

@@ -29,6 +29,7 @@ class MainActivity : Activity() {
     private lateinit var romList: LinearLayout
     private lateinit var df0Text: TextView
     private lateinit var cd32Text: TextView
+    private lateinit var cdtvText: TextView
     private lateinit var cdText: TextView
     private lateinit var cfgList: LinearLayout
     private lateinit var midiText: TextView
@@ -88,6 +89,8 @@ class MainActivity : Activity() {
             c.addView(label("ROM de la CD32"))
             cd32Text = TextView(this).also { c.addView(it) }
             c.addView(row(button("ROM CD32…") { pick(REQ_CD32) }, button("Extension…") { pick(REQ_CD32EXT) }))
+            c.addView(label("ROM du CDTV"))
+            cdtvText = TextView(this).also { c.addView(it) }
         }
 
         // Disques
@@ -96,7 +99,7 @@ class MainActivity : Activity() {
             df0Text = TextView(this).also { c.addView(it) }
             c.addView(row(button("Insérer…") { pick(REQ_DF0) }, button("Éjecter") { s.df0 = ""; s.df0Name = ""; profile(); refresh() }))
             c.addView(row(button("Disquette vierge…") { blankDisk() }))
-            c.addView(label("CD de la CD32 (.iso ou .chd)"))
+            c.addView(label("CD de la CD32 ou du CDTV (.iso ou .chd)"))
             cdText = TextView(this).also { c.addView(it) }
             c.addView(row(button("Choisir un CD…") { pick(REQ_CD) }))
             c.addView(label("Disques durs (lus sur place, sans copie)"))
@@ -111,9 +114,11 @@ class MainActivity : Activity() {
             c.addView(row(choice("A500", { s.model == "A500" }) { s.model = "A500" },
                 choice("A600", { s.model == "A600" }) { s.model = "A600" },
                 choice("A1200", { s.model == "A1200" }) { s.model = "A1200" }))
-            c.addView(row(choice("A4000", { s.model == "A4000" }) { s.model = "A4000" },
-                choice("CD32", { s.model == "CD32" }) { s.model = "CD32" }))
-            c.addView(switch("JIT 68040 : beaucoup plus rapide (A1200, A4000)", { s.jit }) { s.jit = it })
+            c.addView(row(choice("A3000", { s.model == "A3000" }) { s.model = "A3000" },
+                choice("A4000", { s.model == "A4000" }) { s.model = "A4000" }))
+            c.addView(row(choice("CD32", { s.model == "CD32" }) { s.model = "CD32" },
+                choice("CDTV", { s.model == "CDTV" }) { s.model = "CDTV" }))
+            c.addView(switch("JIT 68040 : beaucoup plus rapide (A1200, A3000, A4000)", { s.jit }) { s.jit = it })
             c.addView(switch("Carte graphique RTG : haute résolution d'AGS et du Workbench", { s.rtg }) { s.rtg = it })
             c.addView(switch("Volume SHARED: (sauvegardes AGS et WHDLoad)", { s.shared }) { s.shared = it })
             c.addView(switch("NTSC 60 Hz (sinon PAL 50 Hz)", { s.ntsc }) { s.ntsc = it })
@@ -145,6 +150,11 @@ class MainActivity : Activity() {
             c.addView(row(button("Enregistrer…") { saveConfigDialog() }))
             c.addView(row(button("Exporter .uae…") { exportUae() }, button("Importer .uae…") { pick(REQ_UAE) }))
             c.addView(note("Une configuration garde la machine et ses disques. L'export .uae se relit dans WinUAE, Amiberry et la version web ; l'import retrouve les disques par leur nom dans la Bibliothèque."))
+        }
+        // Changer d'appareil
+        card(col, "📦 Changer d'appareil") { c ->
+            c.addView(row(button("Tout exporter…") { exportBackup() }, button("Importer…") { pick(REQ_BACKUP_IN) }))
+            c.addView(note("Un seul fichier .zip avec les réglages, les touches de la manette, les configurations, les Kickstart, les sauvegardes d'état, celles des jeux (WHDLoad, SHARED:) et les captures. Les jeux et disques n'y sont pas : sur l'autre appareil, ajoutez-les à la Bibliothèque, ils sont retrouvés par leur nom. Ce fichier contient vos Kickstart : ne le partagez pas."))
         }
         col.addView(note("Version ${BuildConfig.VERSION_NAME} · même cœur que la version web laurent-67370.github.io/amiga1200"))
 
@@ -202,18 +212,28 @@ class MainActivity : Activity() {
     private fun refresh() {
         val a500 = s.model == "A500"
         val cd32 = s.model == "CD32"
+        val cdtv = s.model == "CDTV"
+        val console = cd32 || cdtv
         val big = Config.bigBox(s.model)
-        val parts = mutableListOf(if (cd32) "CD32" else "Amiga ${s.model.removePrefix("A")}")
+        val parts = mutableListOf(if (console) s.model else "Amiga ${s.model.removePrefix("A")}")
         if (big) parts += if (s.jit) "68040 JIT" else if (s.model == "A1200") "68020" else "68030"
         if (big && s.rtg) parts += "RTG"
         if (cd32) parts += if (cd32Rom()) "ROM CD32" else "ROM CD32 manquante"
+        else if (cdtv) parts += if (cdtvReady()) Kickstarts.best(this, "CDTV")!!.label.substringBefore(" (") + " + extension" else "ROM du CDTV manquante"
         else parts += chosenRom()?.label?.substringBefore(" (") ?: "AROS"
         val n = s.hds.size
-        if (!cd32 && n > 0) parts += "$n disque${if (n > 1) "s" else ""} dur${if (n > 1) "s" else ""}"
-        if (!cd32 && s.df0Name.isNotEmpty()) parts += "DF0: ${s.df0Name}"
-        if (cd32) parts += if (s.cdName.isNotEmpty()) "CD : ${s.cdName}" else "sans CD"
+        if (!console && n > 0) parts += "$n disque${if (n > 1) "s" else ""} dur${if (n > 1) "s" else ""}"
+        if (!console && s.df0Name.isNotEmpty()) parts += "DF0: ${s.df0Name}"
+        if (console) parts += if (s.cdName.isNotEmpty()) "CD : ${s.cdName}" else "sans CD"
         cd32Text.text = if (cd32Rom()) "✓ ROM CD32" + (if (File(Config.sysDir(this), "cd32ext.rom").exists()) " et extension" else " (ROM complète de 1 Mo, ou ajoutez l'extension)")
             else "Aucune : la CD32 a besoin de sa ROM (kick40060.CD32 + extension, ou ROM complète de 1 Mo)."
+        val ext = Kickstarts.cdtvExt(this)
+        val kick13 = Kickstarts.best(this, "CDTV")
+        cdtvText.text = when {
+            ext != null && kick13 != null -> "✓ ${ext.label}, avec le ${kick13.label}"
+            ext != null -> "✓ ${ext.label} ; il faut aussi un Kickstart de l'Amiga 500 (1.3 de préférence)."
+            else -> "Le CDTV a besoin de son extension (ROM de 256 Ko) et d'un Kickstart 1.3 : ajoutez-les avec « Ajouter un Kickstart… »."
+        }
         cdText.text = s.cdName.ifEmpty { "aucun" }
         summary.text = parts.joinToString(" · ")
         midiBox.visibility = if (s.midi) View.VISIBLE else View.GONE
@@ -224,10 +244,11 @@ class MainActivity : Activity() {
         val name = if (s.model == "A500") "l'Amiga 500" else "l'${s.model}"
         romText.text = when {
             s.model == "CD32" -> "La CD32 utilise sa propre ROM (ci-dessous)."
+            s.model == "CDTV" -> "Le CDTV utilise son Kickstart et son extension (ci-dessous)."
             chosen != null -> "Pour $name : ${chosen.label}"
             s.rom == "aros" && roms.isNotEmpty() -> "AROS (ROM libre) choisi à la place de vos Kickstart."
             roms.isNotEmpty() -> "⚠ Aucun de vos Kickstart ne convient à $name : AROS démarre à sa place. " +
-                if (Config.bigBox(s.model)) "L'${s.model} demande un Kickstart 3.0 ou 3.1." else "Ajoutez un Kickstart 1.3 ou 2.0."
+                if (Config.bigBox(s.model)) "L'${s.model} demande un Kickstart 3.0 ou plus récent." else "Ajoutez un Kickstart 1.3 ou 2.0."
             else -> "AROS, ROM libre fournie. Pour les jeux, WHDLoad et AGS, ajoutez vos Kickstart : 3.1 pour l'A1200, 1.3 pour l'Amiga 500."
         }
         romList.removeAllViews()
@@ -300,7 +321,7 @@ class MainActivity : Activity() {
                 text = when (libKind) {
                     Library.WHD -> "Aucun jeu. Ajoutez des archives WHDLoad (.lha) : un toucher les lance, sans disque dur à préparer."
                     Library.FLOPPY -> "Aucune disquette (ADF, DMS, IPF…)."
-                    Library.CD -> "Aucun CD de CD32 (.iso ou .chd : l'image doit tenir dans un seul fichier)."
+                    Library.CD -> "Aucun CD de CD32 ou de CDTV (.iso ou .chd : l'image doit tenir dans un seul fichier)."
                     else -> "Aucun disque dur (.hdf)."
                 }
             })
@@ -320,7 +341,11 @@ class MainActivity : Activity() {
                 when (it.kind) {
                     Library.WHD -> addView(chip("▶ Jouer") { playWhd(it) })
                     Library.FLOPPY -> addView(chip("DF0:") { useFloppy(it) })
-                    Library.CD -> addView(chip("▶ CD32") { playCd(it) })
+                    Library.CD -> {
+                        // CDTV proposé dès que son extension est installée ; sinon la CD32
+                        if (Kickstarts.cdtvExt(this@MainActivity) != null) addView(chip("▶ CDTV") { playCd(it, "CDTV") })
+                        addView(chip("▶ CD32") { playCd(it) })
+                    }
                     else -> addView(chip(if (s.hds.any { h -> h.uri == it.uri }) "✓ branché" else "+ Brancher") { useHdf(it) })
                 }
                 setOnLongClickListener { _ -> libItemMenu(it); true }
@@ -392,8 +417,25 @@ class MainActivity : Activity() {
 
     private fun cd32Rom() = File(Config.sysDir(this), "cd32.rom").exists()
 
-    /** CD de la CD32 : la console démarre dessus (il lui faut sa ROM) */
-    private fun playCd(it: LibItem) {
+    /** Le CDTV a son extension et un Kickstart de l'Amiga 500 */
+    private fun cdtvReady() = Kickstarts.cdtvExt(this) != null && Kickstarts.best(this, "CDTV") != null
+
+    private fun cdtvMissing() {
+        AlertDialog.Builder(this).setTitle("ROM du CDTV nécessaires")
+            .setMessage("Le CDTV démarre sur un Kickstart 1.3 (celui de l'Amiga 500) et sur son extension (ROM de 256 Ko, par exemple « CDTV extended ROM v2.30 ») : ajoutez-les tous deux dans la carte Kickstart. AROS ne le fait pas démarrer.")
+            .setPositiveButton("Choisir…") { _, _ -> pick(REQ_ROM) }.setNegativeButton("Annuler", null).show()
+    }
+
+    /** CD de la CD32 ou du CDTV : la console démarre dessus (il lui faut ses ROM) */
+    private fun playCd(it: LibItem, console: String = "CD32") {
+        if (console == "CDTV") {
+            if (!cdtvReady()) { cdtvMissing(); return }
+            Library.touch(this, it.uri)
+            s.cd = it.uri; s.cdName = it.name; s.model = "CDTV"
+            refresh()
+            power()
+            return
+        }
         if (!cd32Rom()) {
             AlertDialog.Builder(this).setTitle("ROM de la CD32 nécessaire")
                 .setMessage("La CD32 démarre sur sa propre ROM : choisissez kick40060.CD32 (puis son extension), ou une ROM complète de 1 Mo, dans la carte Kickstart.")
@@ -454,7 +496,8 @@ class MainActivity : Activity() {
         val (rom, why) = Kickstarts.install(this, uri)
         if (rom == null) { toast("$name : $why"); return }
         s.rom = "user"
-        val forModels = listOf("A500", "A600", "A1200", "A4000").filter { Kickstarts.fits(rom, it) }
+        if (rom.cdtvExt) { toast("${rom.label} ajoutée : le CDTV démarre avec elle et un Kickstart 1.3"); return }
+        val forModels = listOf("A500", "A600", "A1200", "A3000", "A4000").filter { Kickstarts.fits(rom, it) }
         toast("${rom.label} ajouté" + if (forModels.isEmpty()) "" else " : servira pour " + forModels.joinToString(", ") { if (it == "A500") "l'Amiga 500" else "l'$it" })
     }
 
@@ -465,6 +508,28 @@ class MainActivity : Activity() {
             putExtra(Intent.EXTRA_TITLE, "Vierge.adf")
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION or Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION)
         }, REQ_BLANK)
+    }
+
+    private fun exportBackup() {
+        val day = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.FRANCE).format(java.util.Date())
+        startActivityForResult(Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE); type = "application/zip"
+            putExtra(Intent.EXTRA_TITLE, "amiga1200-sauvegarde-$day.zip")
+        }, REQ_BACKUP_OUT)
+    }
+
+    /** Export ou import dans un fil à part (les sauvegardes d'état pèsent plusieurs dizaines de Mo) */
+    private fun backupTask(title: String, job: () -> Backup.Result) {
+        val wait = AlertDialog.Builder(this).setTitle(title).setMessage("Patientez…").setCancelable(false).show()
+        Thread {
+            val r = job()
+            runOnUiThread {
+                wait.dismiss()
+                if (isFinishing) return@runOnUiThread
+                refresh()
+                AlertDialog.Builder(this).setTitle(if (r.ok) title else "Échec").setMessage(r.message).setPositiveButton("OK", null).show()
+            }
+        }.start()
     }
 
     private fun exportUae() {
@@ -482,7 +547,7 @@ class MainActivity : Activity() {
             .setMessage("""
                 1. Kickstart : ajoutez vos fichiers ROM, plusieurs si vous voulez (3.1 pour l'A1200, 1.3 pour l'Amiga 500) : chacun sert à la machine qui lui convient. Sans eux, la ROM libre AROS démarre, mais WHDLoad, AGS et la plupart des jeux demandent un vrai Kickstart.
                 2. Jeux et disques : ajoutez vos jeux WHDLoad (.lha), disquettes, disques durs (.hdf) et CD à la Bibliothèque. Ils sont lus sur place, sans copie, même s'ils font plusieurs Go. Un jeu WHDLoad se lance d'un toucher (▶ Jouer). Pour AGS, ajoutez tous ses .hdf d'un coup dans Disques.
-                3. Préréglage : « AGS / Workbench » pour AGS et le Workbench, « Amiga 500 » pour les vieux jeux, « CD32 » pour la console.
+                3. Préréglage : « AGS / Workbench » pour AGS et le Workbench, « Amiga 500 » pour les vieux jeux, « CD32 » pour la console. Carte Machine : A600, A3000, A4000 et CDTV aussi (le CDTV demande un Kickstart 1.3 et son extension).
                 4. Allumez.
 
                 Pendant le jeu (boutons en haut à droite) :
@@ -495,7 +560,7 @@ class MainActivity : Activity() {
                 Souris tactile : glisser pour déplacer le pointeur, toucher pour cliquer, toucher à deux doigts pour le clic droit, appui long puis glisser pour déplacer une fenêtre.
                 Bouton Retour du téléphone, ou F12 sur un clavier : menu.
 
-                À l'accueil aussi : Image (filtre net ou écran cathodique, pixels réguliers), Son et MIDI (bruit des lecteurs, synthé MIDI), configurations enregistrées. Appui long sur un jeu de la Bibliothèque : raccourci sur l'écran d'accueil du téléphone.
+                À l'accueil aussi : Image (filtre net ou écran cathodique, pixels réguliers), Son et MIDI (bruit des lecteurs, synthé MIDI), configurations enregistrées, et « Changer d'appareil » : tout exporter dans un fichier .zip, puis l'importer sur un autre téléphone. Appui long sur un jeu de la Bibliothèque : raccourci sur l'écran d'accueil du téléphone.
             """.trimIndent())
             .setPositiveButton("Compris", null)
             .show()
@@ -557,6 +622,14 @@ class MainActivity : Activity() {
                 toast("Disquette vierge $name dans DF0:")
             }
             REQ_UAE -> toast(ConfigsIO.import(this, s, uri))
+            REQ_BACKUP_OUT -> { backupTask("Export de la sauvegarde") { Backup.export(this, uri) }; return }
+            REQ_BACKUP_IN -> {
+                AlertDialog.Builder(this).setTitle("Importer la sauvegarde $name ?")
+                    .setMessage("Les réglages, configurations et touches de la manette sont remplacés par ceux de la sauvegarde ; ses Kickstart, sauvegardes d'état et captures s'ajoutent (celles de même nom sont remplacées). Éteignez l'Amiga avant.")
+                    .setPositiveButton("Importer") { _, _ -> backupTask("Import de la sauvegarde") { Backup.import(this, uri) } }
+                    .setNegativeButton("Annuler", null).show()
+                return
+            }
             REQ_UAE_OUT -> toast(if (ConfigsIO.export(this, s, uri)) "Configuration exportée : $name" else "Export impossible")
             REQ_CD32, REQ_CD32EXT -> {
                 val f = File(Config.sysDir(this), if (req == REQ_CD32) "cd32.rom" else "cd32ext.rom")
@@ -602,6 +675,7 @@ class MainActivity : Activity() {
     }
 
     private fun power(whdUri: String? = null, whdName: String? = null) {
+        if (whdUri == null && s.model == "CDTV" && !cdtvReady()) { cdtvMissing(); return }
         startActivity(Intent(this, EmuActivity::class.java).apply {
             if (whdUri != null) { putExtra(EmuActivity.EXTRA_WHD_URI, whdUri); putExtra(EmuActivity.EXTRA_WHD_NAME, whdName) }
         })
@@ -683,6 +757,8 @@ class MainActivity : Activity() {
         const val REQ_UAE = 8
         const val REQ_UAE_OUT = 9
         const val REQ_BLANK = 10
+        const val REQ_BACKUP_OUT = 11
+        const val REQ_BACKUP_IN = 12
         const val EXTRA_RESTART = "rallumer"
         const val ACTION_PLAY = "io.github.laurent67370.amiga1200.JOUER"
         const val EXTRA_PLAY_URI = "lien"
