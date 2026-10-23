@@ -13,6 +13,10 @@ object Native {
     external fun setDirs(sys: String, save: String)
     external fun setOption(key: String, value: String)
     external fun setSurface(surface: Surface?)
+    /** Filtre de l'image (0 lisse, 1 net, 2 écran cathodique) et taille de la vue */
+    external fun setFilter(mode: Int, viewW: Int, viewH: Int)
+    /** Image affichée en pixels ARGB (largeur videoW()), null sans image */
+    external fun frame(): IntArray?
     external fun start(path: String): Boolean
     /** 1 en démarrage, 2 en marche, -1 refus du cœur, 0 échec */
     external fun state(): Int

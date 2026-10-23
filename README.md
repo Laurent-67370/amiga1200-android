@@ -62,6 +62,14 @@ les réglages.
   F1…), réglées pour chaque jeu (menu → Commandes → Touches de la manette).
 - **Raccourcis de jeux** : un appui long dans la Bibliothèque pose sur l'écran d'accueil d'Android une icône qui lance le
   jeu WHDLoad, la disquette ou le CD directement.
+- **Image** (accueil → Commandes, ou menu → Écran) : lisse, nette (pixels francs, agrandie sans flou) ou écran
+  cathodique (lignes de balayage) ; **pixels réguliers** (agrandissement en multiple entier) ; **zoom et position
+  verticale retenus pour chaque jeu**, pour retirer les bandes noires.
+- **Captures d'écran** (menu → Écran) : l'image du jeu apparaît dans la Bibliothèque, une copie va dans la galerie
+  (Images/Amiga1200). Un jeu sans image en reçoit une à l'extinction.
+- **Sauvegardes d'état avec miniature et date** de chaque emplacement.
+- **Disquette vierge** formatée (accueil → Disques, ou en cours de partie → Disquettes → Insérer), pour les jeux qui
+  sauvegardent sur disquette.
 - **Bruit des lecteurs de disquettes** (clic de la tête, rotation, insertion), comme sur un vrai Amiga : accueil
   → Son et MIDI, ou menu → Avancé en cours de partie.
 - **MIDI** sur le port série de l'Amiga (Bars & Pipes, Music-X, OctaMED, jeux qui parlent MIDI) : l'Amiga joue sur un

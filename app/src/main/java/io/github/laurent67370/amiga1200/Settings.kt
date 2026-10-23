@@ -70,6 +70,17 @@ class Settings(ctx: Context) {
     var fill: Boolean get() = p.getBoolean("fill", false); set(v) = flag("fill", v)
     var showSpeed: Boolean get() = p.getBoolean("showSpeed", true); set(v) = flag("showSpeed", v)
 
+    // ---------- image ----------
+    /** Filtre : 0 lisse, 1 net (pixels francs), 2 écran cathodique (lignes de balayage) */
+    var filter: Int get() = p.getInt("filter", 0); set(v) { p.edit().putInt("filter", v).commit() }
+    /** Agrandissement en multiple entier des pixels de l'Amiga (pixels tous de la même taille) */
+    var integer: Boolean get() = p.getBoolean("integer", false); set(v) = flag("integer", v)
+    /** Cadrage d'un jeu : zoom (1 = image entière) et décalage vertical (fraction de la hauteur), pour les jeux qui
+     *  n'occupent pas tout l'écran */
+    fun zoom(game: String) = p.getFloat("zoom:$game", 1f)
+    fun shiftY(game: String) = p.getFloat("decalage:$game", 0f)
+    fun setFraming(game: String, zoom: Float, shiftY: Float) { p.edit().putFloat("zoom:$game", zoom).putFloat("decalage:$game", shiftY).apply() }
+
     // ---------- son et MIDI ----------
     /** Bruits des lecteurs de disquettes (clic de la tête, rotation), comme sur un vrai Amiga */
     var floppySound: Boolean get() = p.getBoolean("floppySound", true); set(v) = flag("floppySound", v)

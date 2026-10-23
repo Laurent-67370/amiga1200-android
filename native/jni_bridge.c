@@ -163,21 +163,66 @@ static unsigned win_w, win_h;
 static pthread_t render_thr;
 static volatile int render_on;
 
-/* Une image nouvelle : copiée telle quelle dans la surface (RGBA, comme pour la page) ; Android la met à l'échelle */
+/* Filtres (réglages de l'image) : 0 lisse (l'image est copiée telle quelle, Android l'agrandit en la lissant),
+ * 1 nette et 2 écran cathodique : l'image est agrandie ici à la taille de la vue, pixel le plus proche, sans flou ;
+ * l'écran cathodique assombrit une ligne sur deux de l'Amiga (lignes de balayage). */
+static volatile int flt_mode;
+static volatile unsigned view_w, view_h;
+#define OUT_MAX 4096
+static uint16_t xmap[OUT_MAX];
+static unsigned xmap_w, xmap_bw;
+
+static inline uint32_t dim(uint32_t p) { return 0xff000000u | (((p >> 1) & 0x007f7f7fu) + ((p >> 3) & 0x001f1f1fu)); }
+
+static void scale(const uint32_t *src, unsigned w, unsigned h, uint32_t *dst, unsigned stride, unsigned bw, unsigned bh, int crt) {
+  if (xmap_w != w || xmap_bw != bw) {
+    for (unsigned x = 0; x < bw; x++) xmap[x] = (uint16_t)((x * 2 + 1) * w / (bw * 2));
+    xmap_w = w; xmap_bw = bw;
+  }
+  /* Lignes de l'Amiga : une image de plus de 400 lignes a ses lignes doublées (basse résolution) ou entrelacées */
+  unsigned per = h >= 400 ? 2 : 1;
+  const uint32_t *prev = NULL; unsigned prev_key = ~0u;
+  for (unsigned y = 0; y < bh; y++) {
+    unsigned sy = (unsigned)(((unsigned long)y * 2 + 1) * h / (bh * 2));
+    int d = 0;
+    if (crt) {
+      unsigned long ph = (((unsigned long)y * 2 + 1) * h * 2 / (bh * 2 * per)) & 1; /* moitié basse de chaque ligne */
+      d = (int)ph;
+    }
+    uint32_t *o = dst + (size_t)y * stride;
+    unsigned key = sy * 2 + (unsigned)d;
+    if (key == prev_key) { memcpy(o, prev, (size_t)bw * 4); continue; }
+    const uint32_t *s = src + (size_t)sy * w;
+    if (d) for (unsigned x = 0; x < bw; x++) o[x] = dim(s[xmap[x]]);
+    else for (unsigned x = 0; x < bw; x++) o[x] = s[xmap[x]];
+    prev = o; prev_key = key;
+  }
+}
+
+/* Une image nouvelle : copiée dans la surface (RGBA, comme pour la page), ou agrandie selon le filtre */
 static void draw(void) {
   const uint8_t *src = fe_video_ptr();
   unsigned w = fe_video_w(), h = fe_video_h();
   if (!src || !w || !h) return;
+  int mode = flt_mode;
+  unsigned bw = w, bh = h;
+  if (mode && view_w >= w && view_h >= h) {
+    bw = view_w < OUT_MAX ? view_w : OUT_MAX; bh = view_h < OUT_MAX ? view_h : OUT_MAX;
+  } else mode = 0;
   pthread_mutex_lock(&win_mtx);
   if (win) {
-    if (w != win_w || h != win_h) {
-      ANativeWindow_setBuffersGeometry(win, (int32_t)w, (int32_t)h, AHARDWAREBUFFER_FORMAT_R8G8B8A8_UNORM);
-      win_w = w; win_h = h;
+    if (bw != win_w || bh != win_h) {
+      ANativeWindow_setBuffersGeometry(win, (int32_t)bw, (int32_t)bh, AHARDWAREBUFFER_FORMAT_R8G8B8A8_UNORM);
+      win_w = bw; win_h = bh;
     }
     ANativeWindow_Buffer b;
     if (ANativeWindow_lock(win, &b, NULL) == 0) {
-      unsigned cw = (unsigned)b.width < w ? (unsigned)b.width : w, ch = (unsigned)b.height < h ? (unsigned)b.height : h;
-      for (unsigned y = 0; y < ch; y++) memcpy((uint8_t *)b.bits + (size_t)y * b.stride * 4, src + (size_t)y * w * 4, (size_t)cw * 4);
+      if (mode && (unsigned)b.width == bw && (unsigned)b.height == bh)
+        scale((const uint32_t *)src, w, h, b.bits, (unsigned)b.stride, bw, bh, mode == 2);
+      else {
+        unsigned cw = (unsigned)b.width < w ? (unsigned)b.width : w, ch = (unsigned)b.height < h ? (unsigned)b.height : h;
+        for (unsigned y = 0; y < ch; y++) memcpy((uint8_t *)b.bits + (size_t)y * b.stride * 4, src + (size_t)y * w * 4, (size_t)cw * 4);
+      }
       ANativeWindow_unlockAndPost(win);
     }
   }
@@ -201,6 +246,28 @@ JNIEXPORT void JNICALL JNI(setSurface)(JNIEnv *env, jobject self, jobject surfac
   win = surface ? ANativeWindow_fromSurface(env, surface) : NULL;
   win_w = win_h = 0;
   pthread_mutex_unlock(&win_mtx);
+}
+
+/* Filtre de l'image et taille de la vue (pour les filtres net et cathodique) */
+JNIEXPORT void JNICALL JNI(setFilter)(JNIEnv *env, jobject self, jint mode, jint w, jint h) {
+  (void)env; (void)self;
+  view_w = w > 0 ? (unsigned)w : 0; view_h = h > 0 ? (unsigned)h : 0;
+  flt_mode = mode;
+}
+/* Image affichée, en pixels ARGB d'Android (captures d'écran, miniatures des sauvegardes) ; null sans image */
+JNIEXPORT jintArray JNICALL JNI(frame)(JNIEnv *env, jobject self) {
+  (void)self;
+  const uint32_t *src = (const uint32_t *)fe_video_ptr();
+  unsigned w = fe_video_w(), h = fe_video_h();
+  if (!src || !w || !h) return NULL;
+  size_t n = (size_t)w * h;
+  uint32_t *px = malloc(n * 4);
+  if (!px) return NULL;
+  for (size_t i = 0; i < n; i++) { uint32_t p = src[i]; px[i] = 0xff000000u | ((p & 0xffu) << 16) | (p & 0xff00u) | ((p >> 16) & 0xffu); }
+  jintArray a = (*env)->NewIntArray(env, (jsize)n);
+  if (a) (*env)->SetIntArrayRegion(env, a, 0, (jsize)n, (const jint *)px);
+  free(px);
+  return a;
 }
 
 /* ---------- son ---------- */
