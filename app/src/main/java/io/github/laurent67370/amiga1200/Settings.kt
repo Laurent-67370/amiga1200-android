@@ -24,7 +24,7 @@ class Settings(ctx: Context) {
     /** JIT 68040 (A1200 seulement) */
     var jit: Boolean get() = p.getBoolean("jit", true); set(v) { flag("jit", v); saveProfile() }
     var ntsc: Boolean get() = p.getBoolean("ntsc", false); set(v) = flag("ntsc", v)
-    /** « aros » (ROM libre fournie) ou « user » (Kickstart copié dans files/sys/kick.rom) */
+    /** « aros » (ROM libre fournie) ou « user » (Kickstart installés, choisi selon la machine : voir Kickstarts) */
     var rom: String get() = str("rom", "aros"); set(v) = put("rom", v)
     var romName: String get() = str("romName", ""); set(v) = put("romName", v)
     /** Disquette DF0: et disque dur DH0: : adresse du document choisi (lu sur place) et son nom */
@@ -227,8 +227,10 @@ object Config {
             if (cd != null) l += "cdimage0=$cd,image"
             l += listOf("ntsc=${s.ntsc}", "gfx_resolution=hires")
         } else {
-            val kick = File(sys, "kick.rom")
-            if (s.rom == "user" && kick.exists()) l += "kickstart_rom_file=${kick.path}"
+            // Le Kickstart qui convient à cette machine parmi ceux installés ; sinon AROS
+            val kick = if (s.rom == "user") Kickstarts.best(ctx, model) else null
+            s.romName = kick?.label ?: ""
+            if (kick != null) l += "kickstart_rom_file=${kick.file.path}"
             else {
                 aros(ctx)
                 l += "kickstart_rom_file=${File(sys, "aros-rom.bin").path}"
