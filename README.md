@@ -26,7 +26,10 @@ les réglages, la Bibliothèque et les sauvegardes.
 - **JIT** (A1200, A4000) : 68040 avec FPU traduit en code ARM64, vitesse maximale, 64 Mo de mémoire Fast Zorro III.
   « Redémarrer sans JIT » (menu) retrouve un 68020 d'origine pour les démos qui n'aiment pas le 68040 ; le choix est
   retenu pour le disque de démarrage.
-- **Kickstart** : le vôtre (copié dans l'application), sinon la ROM libre **AROS** fournie.
+- **Kickstart** : les vôtres, **plusieurs à la fois**, reconnus à leur contenu (somme CRC et version) : chacun sert
+  automatiquement à la machine qui lui convient (1.3 pour l'Amiga 500, 3.1 pour l'A1200…), et l'accueil prévient si
+  aucun ne convient. Sinon, la ROM libre **AROS** fournie. Un Kickstart ajouté avec les jeux est installé, pas rangé
+  dans la Bibliothèque.
 - **Jeux WHDLoad en un geste** : une archive `.lha` de la Bibliothèque se lance d'un toucher. Le cœur Amiberry monte
   le jeu, applique ses réglages (base de jeux d'Amiberry) et garde ses sauvegardes. Il faut un vrai Kickstart.
 - **Bibliothèque** : jeux WHDLoad, disquettes, disques durs et CD déjà choisis, retrouvés d'un toucher, avec l'image

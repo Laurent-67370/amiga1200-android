@@ -26,6 +26,7 @@ class MainActivity : Activity() {
     private lateinit var s: Settings
     private lateinit var summary: TextView
     private lateinit var romText: TextView
+    private lateinit var romList: LinearLayout
     private lateinit var df0Text: TextView
     private lateinit var cd32Text: TextView
     private lateinit var cdText: TextView
@@ -79,7 +80,11 @@ class MainActivity : Activity() {
         // Kickstart
         card(col, "🔑 Kickstart") { c ->
             romText = TextView(this).also { c.addView(it) }
-            c.addView(row(button("Choisir un fichier…") { pick(REQ_ROM) }, button("AROS (libre)") { s.rom = "aros"; refresh() }))
+            romList = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+            c.addView(romList)
+            c.addView(row(button("Ajouter un Kickstart…") { pick(REQ_ROM) },
+                button("AROS / mes Kickstart") { s.rom = if (s.rom == "aros") "user" else "aros"; refresh() }))
+            c.addView(note("Installez-en plusieurs (1.3 pour l'Amiga 500, 3.1 pour l'A1200…) : chacun sert à la machine qui lui convient, reconnu à son contenu."))
             c.addView(label("ROM de la CD32"))
             cd32Text = TextView(this).also { c.addView(it) }
             c.addView(row(button("ROM CD32…") { pick(REQ_CD32) }, button("Extension…") { pick(REQ_CD32EXT) }))
@@ -190,7 +195,9 @@ class MainActivity : Activity() {
     }
 
     // ---------- état affiché ----------
-    private fun userRom() = s.rom == "user" && File(Config.sysDir(this), "kick.rom").exists()
+    /** Kickstart utilisé pour la machine choisie (null : AROS) */
+    private fun chosenRom(): Rom? = if (s.rom == "user") Kickstarts.best(this, s.model) else null
+    private fun userRom() = chosenRom() != null
 
     private fun refresh() {
         val a500 = s.model == "A500"
@@ -200,7 +207,7 @@ class MainActivity : Activity() {
         if (big) parts += if (s.jit) "68040 JIT" else if (s.model == "A1200") "68020" else "68030"
         if (big && s.rtg) parts += "RTG"
         if (cd32) parts += if (cd32Rom()) "ROM CD32" else "ROM CD32 manquante"
-        else parts += if (userRom()) s.romName.substringBeforeLast('.').substringBefore(" (").let { if (it.startsWith("Kickstart", true)) it else "Kickstart $it" } else "AROS"
+        else parts += chosenRom()?.label?.substringBefore(" (") ?: "AROS"
         val n = s.hds.size
         if (!cd32 && n > 0) parts += "$n disque${if (n > 1) "s" else ""} dur${if (n > 1) "s" else ""}"
         if (!cd32 && s.df0Name.isNotEmpty()) parts += "DF0: ${s.df0Name}"
@@ -212,9 +219,29 @@ class MainActivity : Activity() {
         midiBox.visibility = if (s.midi) View.VISIBLE else View.GONE
         midiText.text = "Sortie : ${s.midiOut.ifEmpty { "premier appareil trouvé" }}\nEntrée : ${s.midiIn.ifEmpty { "aucune" }}"
 
-        romText.text = if (userRom() && oldKick() && Config.bigBox(s.model))
-            "⚠ ${s.romName.substringBeforeLast('.')}\nCe Kickstart 1.x est fait pour l'Amiga 500 : l'A1200 et l'A4000 demandent le Kickstart 3.0 ou 3.1. Choisissez « Amiga 500 » ou un autre Kickstart."
-            else if (userRom()) "✓ ${s.romName}" else "AROS, ROM libre fournie. Pour les jeux et AGS, choisissez votre Kickstart 3.1 (A1200) ou 1.3 (A500)."
+        val roms = Kickstarts.list(this)
+        val chosen = chosenRom()
+        val name = if (s.model == "A500") "l'Amiga 500" else "l'${s.model}"
+        romText.text = when {
+            s.model == "CD32" -> "La CD32 utilise sa propre ROM (ci-dessous)."
+            chosen != null -> "Pour $name : ${chosen.label}"
+            s.rom == "aros" && roms.isNotEmpty() -> "AROS (ROM libre) choisi à la place de vos Kickstart."
+            roms.isNotEmpty() -> "⚠ Aucun de vos Kickstart ne convient à $name : AROS démarre à sa place. " +
+                if (Config.bigBox(s.model)) "L'${s.model} demande un Kickstart 3.0 ou 3.1." else "Ajoutez un Kickstart 1.3 ou 2.0."
+            else -> "AROS, ROM libre fournie. Pour les jeux, WHDLoad et AGS, ajoutez vos Kickstart : 3.1 pour l'A1200, 1.3 pour l'Amiga 500."
+        }
+        romList.removeAllViews()
+        for (r in roms) romList.addView(LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
+            addView(TextView(this@MainActivity).apply {
+                text = (if (r.file == chosen?.file) "✓ " else "• ") + r.label
+                if (r.file == chosen?.file) setTypeface(typeface, Typeface.BOLD)
+            }, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f))
+            addView(chip("✕") {
+                AlertDialog.Builder(this@MainActivity).setTitle(r.label).setMessage("Retirer ce Kickstart de l'application ? Votre fichier d'origine n'est pas effacé.")
+                    .setPositiveButton("Retirer") { _, _ -> Kickstarts.remove(r); refresh() }.setNegativeButton("Annuler", null).show()
+            })
+        })
         df0Text.text = s.df0Name.ifEmpty { "vide" }
 
         hdList.removeAllViews()
@@ -353,7 +380,7 @@ class MainActivity : Activity() {
     }
 
     private fun playWhd(it: LibItem) {
-        if (!userRom()) {
+        if (!Kickstarts.hasForWhd(this)) {
             AlertDialog.Builder(this).setTitle("Kickstart nécessaire")
                 .setMessage("WHDLoad a besoin d'un vrai Kickstart (3.1 de l'A1200 de préférence) : AROS ne lui suffit pas. Choisissez votre fichier ROM dans la carte Kickstart.")
                 .setPositiveButton("Choisir…") { _, _ -> pick(REQ_ROM) }.setNegativeButton("Annuler", null).show()
@@ -422,19 +449,13 @@ class MainActivity : Activity() {
             }.setNegativeButton("Annuler", null).show()
     }
 
-    /** Kickstart copié dans l'application (files/sys/kick.rom) et choisi pour la machine */
+    /** Kickstart ajouté aux autres (reconnu à son contenu), choisi ensuite selon la machine */
     private fun installRom(uri: Uri, name: String) {
-        if (Disks.copy(this, uri, File(Config.sysDir(this), "kick.rom"))) {
-            s.rom = "user"; s.romName = name
-            toast("Kickstart installé : ${name.substringBeforeLast('.')}")
-        } else toast("Lecture du Kickstart impossible")
-    }
-
-    /** Kickstart 1.x (256 Ko, ou « 1.2 » / « 1.3 » dans son nom) : fait pour l'Amiga 500, pas pour l'A1200 ni l'A4000 */
-    private fun oldKick(): Boolean {
-        if (!userRom()) return false
-        val f = File(Config.sysDir(this), "kick.rom")
-        return f.length() in 1..262144 || Regex("(?i)(v|kick\\D{0,12})1\\.[0-4]\\b").containsMatchIn(s.romName)
+        val (rom, why) = Kickstarts.install(this, uri)
+        if (rom == null) { toast("$name : $why"); return }
+        s.rom = "user"
+        val forModels = listOf("A500", "A600", "A1200", "A4000").filter { Kickstarts.fits(rom, it) }
+        toast("${rom.label} ajouté" + if (forModels.isEmpty()) "" else " : servira pour " + forModels.joinToString(", ") { if (it == "A500") "l'Amiga 500" else "l'$it" })
     }
 
     /** Disquette vierge formatée, créée où l'on veut, mise dans DF0: et dans la Bibliothèque */
@@ -459,7 +480,7 @@ class MainActivity : Activity() {
         AlertDialog.Builder(this)
             .setTitle("Bien démarrer")
             .setMessage("""
-                1. Kickstart : choisissez votre fichier ROM (Kickstart 3.1 pour l'A1200). Sans lui, la ROM libre AROS démarre, mais WHDLoad, AGS et la plupart des jeux demandent un vrai Kickstart.
+                1. Kickstart : ajoutez vos fichiers ROM, plusieurs si vous voulez (3.1 pour l'A1200, 1.3 pour l'Amiga 500) : chacun sert à la machine qui lui convient. Sans eux, la ROM libre AROS démarre, mais WHDLoad, AGS et la plupart des jeux demandent un vrai Kickstart.
                 2. Jeux et disques : ajoutez vos jeux WHDLoad (.lha), disquettes, disques durs (.hdf) et CD à la Bibliothèque. Ils sont lus sur place, sans copie, même s'ils font plusieurs Go. Un jeu WHDLoad se lance d'un toucher (▶ Jouer). Pour AGS, ajoutez tous ses .hdf d'un coup dans Disques.
                 3. Préréglage : « AGS / Workbench » pour AGS et le Workbench, « Amiga 500 » pour les vieux jeux, « CD32 » pour la console.
                 4. Allumez.
