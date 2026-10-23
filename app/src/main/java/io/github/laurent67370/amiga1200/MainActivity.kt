@@ -56,6 +56,7 @@ class MainActivity : Activity() {
             addView(TextView(this@MainActivity).apply {
                 text = "Amiga 1200"; textSize = 26f; setTypeface(typeface, Typeface.BOLD); setTextColor(ACCENT)
             }, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f))
+            addView(chip("✨ Assistant") { wizard() })
             addView(chip("? Aide") { help() })
         })
         summary = TextView(this).apply { textSize = 14f; alpha = 0.85f; setPadding(0, dp(2), 0, dp(10)) }
@@ -200,7 +201,7 @@ class MainActivity : Activity() {
         }
         else if (!getSharedPreferences("aide", MODE_PRIVATE).getBoolean("vue", false)) {
             getSharedPreferences("aide", MODE_PRIVATE).edit().putBoolean("vue", true).apply()
-            window.decorView.post { help() }
+            window.decorView.post { wizard() }
         }
     }
 
@@ -495,6 +496,13 @@ class MainActivity : Activity() {
     private fun installRom(uri: Uri, name: String) {
         val (rom, why) = Kickstarts.install(this, uri)
         if (rom == null) { toast("$name : $why"); return }
+        // ROM de la CD32 reconnue : rangée à sa place (carte Kickstart → ROM CD32)
+        if ("CD32" in rom.models) {
+            val f = File(Config.sysDir(this), if (rom.crc == 0x87746BE2L) "cd32ext.rom" else "cd32.rom")
+            rom.file.copyTo(f, overwrite = true); Kickstarts.remove(rom)
+            toast(if (rom.crc == 0x87746BE2L) "Extension de la CD32 installée" else "ROM de la CD32 installée")
+            return
+        }
         s.rom = "user"
         if (rom.cdtvExt) { toast("${rom.label} ajoutée : le CDTV démarre avec elle et un Kickstart 1.3"); return }
         val forModels = listOf("A500", "A600", "A1200", "A3000", "A4000").filter { Kickstarts.fits(rom, it) }
@@ -540,6 +548,94 @@ class MainActivity : Activity() {
         }, REQ_UAE_OUT)
     }
 
+    // ---------- assistant de premier lancement ----------
+    /** Suite de l'assistant, appelée au retour du choix de fichiers */
+    private var wizAfter: (() -> Unit)? = null
+    private var wizGoal = ""
+
+    /** Quatre étapes : ce que l'on veut faire, les Kickstart, les fichiers, puis le geste qui lance */
+    private fun wizard() {
+        val goals = listOf(
+            "whd" to "🎮 Des jeux WHDLoad (.lha), lancés d'un toucher",
+            "floppy" to "💾 Des disquettes de jeux ou de démos (.adf, .dms, .ipf)",
+            "ags" to "🗄 AGS ou un Workbench installé (disques .hdf)",
+            "cd" to "💿 Des jeux sur CD (CD32 ou CDTV)",
+            "aros" to "🔍 Découvrir l'Amiga sans rien installer (AROS)",
+        )
+        AlertDialog.Builder(this).setTitle("Bienvenue ! Que voulez-vous faire ?")
+            .setItems(goals.map { it.second }.toTypedArray()) { _, i -> wizGoal = goals[i].first; wizardRoms() }
+            .setNegativeButton("Plus tard", null).show()
+    }
+
+    /** Étape 2 : les ROM qu'il faut pour ce choix, ou AROS */
+    private fun wizardRoms() {
+        if (wizGoal == "aros") { s.rom = "aros"; s.model = "A1200"; s.jit = true; s.rtg = true; refresh(); wizardDone(); return }
+        val have = when (wizGoal) {
+            "cd" -> cd32Rom() || cdtvReady()
+            "floppy" -> Kickstarts.list(this).any { !it.cdtvExt && "CD32" !in it.models }
+            else -> Kickstarts.hasForWhd(this)
+        }
+        val need = when (wizGoal) {
+            "whd" -> "WHDLoad a besoin de votre Kickstart 3.1 de l'A1200 (ou 3.0, 3.1.4, 3.2) : avec la ROM libre AROS, il ne démarre pas."
+            "ags" -> "AGS et le Workbench ont besoin de votre Kickstart 3.1 de l'A1200 (ou plus récent)."
+            "floppy" -> "Les jeux sur disquette veulent le Kickstart de leur machine : 1.3 pour l'Amiga 500 (la plupart), 3.1 pour les jeux A1200. Choisissez-en plusieurs : chacun servira à la machine qui lui convient."
+            else -> "La CD32 démarre sur sa ROM (kick40060.CD32 et son extension, ou la ROM complète de 1 Mo) ; le CDTV sur un Kickstart 1.3 et son extension."
+        }
+        AlertDialog.Builder(this).setTitle(if (have) "Kickstart : ✓ déjà installés" else "Vos Kickstart")
+            .setMessage((if (have) "Vous pouvez en ajouter d'autres.\n\n" else "") + need +
+                "\n\nLes Kickstart sont les ROM de l'Amiga : ils ne sont pas fournis. On les trouve dans Amiga Forever (Cloanto) ou on les copie de son propre Amiga.")
+            .setPositiveButton(if (have) "Continuer" else "Choisir mes Kickstart…") { _, _ ->
+                if (have) wizardFiles() else { wizAfter = { wizardFiles() }; pick(REQ_ROM, multiple = true) }
+            }
+            .setNeutralButton(if (have) "En ajouter…" else "Je n'en ai pas") { _, _ ->
+                if (have) { wizAfter = { wizardFiles() }; pick(REQ_ROM, multiple = true) } else wizardFiles()
+            }
+            .setNegativeButton("Annuler", null).show()
+    }
+
+    /** Étape 3 : la machine qui convient, puis les fichiers à ranger dans la Bibliothèque */
+    private fun wizardFiles() {
+        if (Kickstarts.list(this).isNotEmpty()) s.rom = "user"
+        when (wizGoal) {
+            "whd" -> { s.model = "A1200"; s.jit = true; s.rtg = true; libKind = Library.WHD }
+            "ags" -> { s.model = "A1200"; s.jit = true; s.rtg = true; s.shared = true }
+            "floppy" -> { s.model = if (Kickstarts.best(this, "A500") != null || Kickstarts.list(this).isEmpty()) "A500" else "A1200"; s.jit = false; s.rtg = false; libKind = Library.FLOPPY }
+            "cd" -> { s.model = if (!cd32Rom() && cdtvReady()) "CDTV" else "CD32"; libKind = Library.CD }
+        }
+        refresh()
+        val what = when (wizGoal) {
+            "whd" -> "Choisissez vos jeux WHDLoad (.lha), plusieurs d'un coup si vous voulez. Ils restent où ils sont : l'application les lit sur place."
+            "ags" -> "Choisissez d'un coup tous les fichiers .hdf d'AGS (ou votre disque Workbench). Ils sont lus sur place, même s'ils font plusieurs Go."
+            "floppy" -> "Choisissez vos disquettes, plusieurs d'un coup si vous voulez. La première ira dans le lecteur DF0:."
+            else -> "Choisissez vos CD (.iso ou .chd, en un seul fichier)."
+        }
+        AlertDialog.Builder(this).setTitle("Vos fichiers").setMessage(what)
+            .setPositiveButton("Choisir…") { _, _ ->
+                wizAfter = { wizardDone() }
+                pick(if (wizGoal == "ags") REQ_HD else REQ_LIB, multiple = true)
+            }
+            .setNeutralButton("Plus tard") { _, _ -> wizardDone() }.show()
+    }
+
+    /** Étape 4 : ce qu'il reste à toucher */
+    private fun wizardDone() {
+        val items = Library.all(this)
+        if (wizGoal == "floppy" && s.df0Name.isEmpty()) items.firstOrNull { it.kind == Library.FLOPPY }?.let { s.df0 = it.uri; s.df0Name = it.name }
+        if (wizGoal == "cd" && s.cdName.isEmpty()) items.firstOrNull { it.kind == Library.CD }?.let { s.cd = it.uri; s.cdName = it.name }
+        refresh()
+        val (msg, canPower) = when (wizGoal) {
+            "whd" -> (if (items.any { it.kind == Library.WHD }) "Touchez « ▶ Jouer » à côté d'un jeu, dans la Bibliothèque : il démarre directement." else "Ajoutez vos jeux .lha avec « Ajouter des fichiers… » (Bibliothèque), puis touchez « ▶ Jouer ».") to false
+            "floppy" -> (if (s.df0Name.isNotEmpty()) "${s.df0Name} est dans DF0:. Allumez ! Pour changer de disquette, touchez « DF0: » à côté d'une autre dans la Bibliothèque." else "Ajoutez vos disquettes à la Bibliothèque, touchez « DF0: » à côté de l'une d'elles, puis allumez.") to s.df0Name.isNotEmpty()
+            "ags" -> (if (s.hds.isNotEmpty()) "Les disques sont branchés : allumez, AGS démarre." else "Ajoutez les disques .hdf dans la carte Disques, puis allumez.") to s.hds.isNotEmpty()
+            "cd" -> (if (s.cdName.isNotEmpty()) "${s.cdName} est prêt : allumez, ou touchez « ▶ CD32 » / « ▶ CDTV » à côté d'un autre CD de la Bibliothèque." else "Ajoutez vos CD à la Bibliothèque, puis touchez « ▶ CD32 » ou « ▶ CDTV ».") to s.cdName.isNotEmpty()
+            else -> "AROS, la ROM libre, démarre un Workbench à découvrir. Pour les jeux, ajoutez plus tard vos Kickstart (carte Kickstart) ; l'assistant reste en haut de l'écran." to true
+        }
+        AlertDialog.Builder(this).setTitle("C'est prêt")
+            .setMessage(msg + "\n\nPendant le jeu : ☰ pour le menu (disquettes, sauvegardes, manette tactile à disposer à votre goût…), ⏏ pour quitter un jeu WHDLoad.")
+            .apply { if (canPower) setPositiveButton("▶ Allumer") { _, _ -> power() } else setPositiveButton("OK", null) }
+            .setNeutralButton("Aide détaillée") { _, _ -> help() }.show()
+    }
+
     // ---------- aide ----------
     private fun help() {
         AlertDialog.Builder(this)
@@ -555,7 +651,7 @@ class MainActivity : Activity() {
                 🖱/🕹  souris tactile ou manette tactile
                 ⏸  pause · ⤓ sauvegarde rapide · ⤒ reprise rapide
                 ⏏  quitter le jeu (F10 ; appui long : * ou Échap)
-                ☰  menu : disquettes, sauvegardes d'état, image et captures, touches de la manette, réinitialisation, journal
+                ☰  menu : disquettes, sauvegardes d'état, image et captures, touches de la manette, disposition de la manette tactile (boutons déplacés, agrandis, touches du clavier ajoutées), réinitialisation, journal
 
                 Souris tactile : glisser pour déplacer le pointeur, toucher pour cliquer, toucher à deux doigts pour le clic droit, appui long puis glisser pour déplacer une fenêtre.
                 Bouton Retour du téléphone, ou F12 sur un clavier : menu.
@@ -579,7 +675,20 @@ class MainActivity : Activity() {
     @Deprecated("API Activity simple, sans AndroidX")
     override fun onActivityResult(req: Int, res: Int, data: Intent?) {
         super.onActivityResult(req, res, data)
+        handleResult(req, res, data)
+        // Assistant : étape suivante, que le choix de fichiers ait abouti ou non
+        wizAfter?.let { wizAfter = null; it() }
+    }
+
+    private fun handleResult(req: Int, res: Int, data: Intent?) {
         if (res != RESULT_OK || data == null) return
+        if (req == REQ_ROM && data.clipData != null) {
+            // Plusieurs Kickstart choisis d'un coup (assistant)
+            val c = data.clipData!!
+            for (k in 0 until c.itemCount) c.getItemAt(k).uri.let { installRom(it, Disks.displayName(this, it)) }
+            refresh()
+            return
+        }
         if (req == REQ_LIB) {
             val uris = data.clipData?.let { c -> (0 until c.itemCount).map { c.getItemAt(it).uri } } ?: listOfNotNull(data.data)
             var last = Library.WHD

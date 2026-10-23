@@ -52,6 +52,8 @@ les réglages, la Bibliothèque et les sauvegardes.
 - **Écran tactile en souris** : glisser déplace le pointeur, toucher fait un clic gauche, toucher à deux doigts un
   clic droit, appui long puis glisser déplace une fenêtre. Boutons G/D à l'écran en option.
 - **Manette tactile** : joystick à gauche (il part de l'endroit où le doigt se pose), deux boutons à droite.
+  **Disposition à votre goût** (menu → Commandes → Disposition de la manette tactile) : boutons déplacés au doigt,
+  agrandis ou retirés, touches du clavier Amiga ajoutées (Espace, F1, Return…), retenue pour un jeu ou pour tous.
 - **Clavier Amiga à l'écran** (⌨) : Esc, F1 à F10, Del, Help, touches Amiga, Ctrl, Alt, Maj (verrouillables),
   flèches et pavé numérique, libellés QWERTY ou AZERTY.
 - **Claviers et manettes** Bluetooth ou USB : Inser = Help, Page préc./suiv. = touches Amiga, F12 = menu. **Deux
@@ -88,7 +90,8 @@ les réglages, la Bibliothèque et les sauvegardes.
 ### Écran d'accueil
 - Cartes : préréglages, Bibliothèque, Kickstart, Disques, Machine, Commandes, Son et MIDI, Configurations, Changer
   d'appareil ; résumé de
-  la machine en haut, bouton « Allumer » toujours visible, aide (?) et aide au premier lancement.
+  la machine en haut, bouton « Allumer » toujours visible, aide (?) et **assistant** (premier lancement, puis ✨) :
+  ce que l'on veut faire (WHDLoad, disquettes, AGS, CD, AROS), les Kickstart qu'il faut, les fichiers, puis le geste qui lance.
 - **Icône adaptative**, monochrome sur Android 13 et plus (icônes à thème).
 
 ## Comment c'est construit
