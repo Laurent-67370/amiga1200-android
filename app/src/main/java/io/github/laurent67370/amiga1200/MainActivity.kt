@@ -200,7 +200,7 @@ class MainActivity : Activity() {
         if (big) parts += if (s.jit) "68040 JIT" else if (s.model == "A1200") "68020" else "68030"
         if (big && s.rtg) parts += "RTG"
         if (cd32) parts += if (cd32Rom()) "ROM CD32" else "ROM CD32 manquante"
-        else parts += if (userRom()) "Kickstart ${s.romName.substringBeforeLast('.')}" else "AROS"
+        else parts += if (userRom()) s.romName.substringBeforeLast('.').substringBefore(" (").let { if (it.startsWith("Kickstart", true)) it else "Kickstart $it" } else "AROS"
         val n = s.hds.size
         if (!cd32 && n > 0) parts += "$n disque${if (n > 1) "s" else ""} dur${if (n > 1) "s" else ""}"
         if (!cd32 && s.df0Name.isNotEmpty()) parts += "DF0: ${s.df0Name}"
@@ -212,7 +212,9 @@ class MainActivity : Activity() {
         midiBox.visibility = if (s.midi) View.VISIBLE else View.GONE
         midiText.text = "Sortie : ${s.midiOut.ifEmpty { "premier appareil trouvé" }}\nEntrée : ${s.midiIn.ifEmpty { "aucune" }}"
 
-        romText.text = if (userRom()) "✓ ${s.romName}" else "AROS, ROM libre fournie. Pour les jeux et AGS, choisissez votre Kickstart 3.1 (A1200) ou 1.3 (A500)."
+        romText.text = if (userRom() && oldKick() && Config.bigBox(s.model))
+            "⚠ ${s.romName.substringBeforeLast('.')}\nCe Kickstart 1.x est fait pour l'Amiga 500 : l'A1200 et l'A4000 demandent le Kickstart 3.0 ou 3.1. Choisissez « Amiga 500 » ou un autre Kickstart."
+            else if (userRom()) "✓ ${s.romName}" else "AROS, ROM libre fournie. Pour les jeux et AGS, choisissez votre Kickstart 3.1 (A1200) ou 1.3 (A500)."
         df0Text.text = s.df0Name.ifEmpty { "vide" }
 
         hdList.removeAllViews()
@@ -420,6 +422,21 @@ class MainActivity : Activity() {
             }.setNegativeButton("Annuler", null).show()
     }
 
+    /** Kickstart copié dans l'application (files/sys/kick.rom) et choisi pour la machine */
+    private fun installRom(uri: Uri, name: String) {
+        if (Disks.copy(this, uri, File(Config.sysDir(this), "kick.rom"))) {
+            s.rom = "user"; s.romName = name
+            toast("Kickstart installé : ${name.substringBeforeLast('.')}")
+        } else toast("Lecture du Kickstart impossible")
+    }
+
+    /** Kickstart 1.x (256 Ko, ou « 1.2 » / « 1.3 » dans son nom) : fait pour l'Amiga 500, pas pour l'A1200 ni l'A4000 */
+    private fun oldKick(): Boolean {
+        if (!userRom()) return false
+        val f = File(Config.sysDir(this), "kick.rom")
+        return f.length() in 1..262144 || Regex("(?i)(v|kick\\D{0,12})1\\.[0-4]\\b").containsMatchIn(s.romName)
+    }
+
     /** Disquette vierge formatée, créée où l'on veut, mise dans DF0: et dans la Bibliothèque */
     private fun blankDisk() {
         startActivityForResult(Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
@@ -480,7 +497,12 @@ class MainActivity : Activity() {
         if (req == REQ_LIB) {
             val uris = data.clipData?.let { c -> (0 until c.itemCount).map { c.getItemAt(it).uri } } ?: listOfNotNull(data.data)
             var last = Library.WHD
-            for (u in uris) { keep(u); val n = Disks.displayName(this, u); Library.add(this, u.toString(), n); last = Library.kindOf(n) }
+            for (u in uris) {
+                val n = Disks.displayName(this, u)
+                // Un Kickstart choisi avec les jeux : installé comme ROM de la machine, pas rangé en disquette
+                if (Library.kindOf(n) == Library.ROM) { installRom(u, n); continue }
+                keep(u); Library.add(this, u.toString(), n); last = Library.kindOf(n)
+            }
             libKind = last
             toast("${uris.size} fichier${if (uris.size > 1) "s" else ""} ajouté${if (uris.size > 1) "s" else ""} à la bibliothèque")
             refresh()
@@ -521,11 +543,9 @@ class MainActivity : Activity() {
                 else toast(if (req == REQ_CD32) "ROM CD32 : $name" else "Extension CD32 : $name")
             }
             REQ_CD -> { keep(uri); Library.add(this, uri.toString(), name); s.cd = uri.toString(); s.cdName = name; profile() }
-            REQ_ROM -> {
-                if (Disks.copy(this, uri, File(Config.sysDir(this), "kick.rom"))) { s.rom = "user"; s.romName = name }
-                else toast("Lecture du Kickstart impossible")
-            }
+            REQ_ROM -> installRom(uri, name)
             REQ_DF0 -> {
+                if (Library.kindOf(name) == Library.ROM) { installRom(uri, name); refresh(); return }
                 keep(uri); Library.add(this, uri.toString(), name)
                 // Une archive WHDLoad choisie comme disquette : elle se lance comme un jeu
                 if (Library.kindOf(name) == Library.WHD) { libKind = Library.WHD; refresh(); playWhd(Library.all(this).first { it.uri == uri.toString() }); return }
