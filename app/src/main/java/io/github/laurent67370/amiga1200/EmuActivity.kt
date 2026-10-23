@@ -294,7 +294,7 @@ class EmuActivity : Activity(), SurfaceHolder.Callback {
         val m = PopupMenu(this, anchor)
         val mm = m.menu
         mm.add(0, 1, 0, if (paused) "▶  Reprendre" else "⏸  Pause")
-        mm.add(0, 5, 0, "💾  Disquettes DF0: / DF1:")
+        mm.add(0, 5, 0, "💾  Disquettes (DF0: à DF3:)")
         mm.add(0, 6, 0, "📁  Sauvegardes d'état")
         mm.add(0, 4, 0, if (s.touchPad) "🖱  Passer en souris tactile" else "🕹  Passer en manette tactile")
         mm.addSubMenu(0, 100, 0, "🕹  Commandes").apply {
@@ -381,9 +381,11 @@ class EmuActivity : Activity(), SurfaceHolder.Callback {
                 ⏏  quitter le jeu ou la démo (touche de sortie de WHDLoad : F10 ; appui long pour choisir * ou Échap)
                 ☰  menu complet (ou bouton Retour, ou F12)
 
+                Menu : Disquettes (changer, disquette vierge), Sauvegardes d'état (4 emplacements avec miniature), Commandes (clavier, touches de la manette pour ce jeu, réglages), Écran (filtre et cadrage de ce jeu, capture d'écran, 4:3 ou pleine largeur), Avancé (bruit des lecteurs, turbo, journal).
+
                 Souris tactile : glisser pour déplacer le pointeur, toucher pour cliquer, toucher à deux doigts pour le clic droit, appui long puis glisser pour déplacer une fenêtre.
                 Manette tactile : le joystick part de l'endroit où le doigt se pose (moitié gauche) ; bouton de tir en bas à droite, 2e bouton au-dessus.
-                Manettes et claviers Bluetooth ou USB : reconnus directement.
+                Manettes et claviers Bluetooth ou USB : reconnus directement ; une seconde manette joue sur le port souris.
             """.trimIndent())
             .setPositiveButton("Compris", null).show()
     }

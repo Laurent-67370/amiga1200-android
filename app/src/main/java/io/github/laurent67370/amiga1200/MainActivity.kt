@@ -442,19 +442,22 @@ class MainActivity : Activity() {
         AlertDialog.Builder(this)
             .setTitle("Bien démarrer")
             .setMessage("""
-                1. Kickstart : choisissez votre fichier ROM (Kickstart 3.1 pour l'A1200). Sans lui, la ROM libre AROS démarre.
-                2. Disques : insérez une disquette, ou ajoutez vos disques durs .hdf. Ils sont lus sur place, sans copie, même s'ils font plusieurs Go. Pour AGS, ajoutez tous ses fichiers d'un coup.
-                3. Préréglage : « AGS / Workbench » pour AGS et le Workbench, « Amiga 500 » pour les vieux jeux.
+                1. Kickstart : choisissez votre fichier ROM (Kickstart 3.1 pour l'A1200). Sans lui, la ROM libre AROS démarre, mais WHDLoad, AGS et la plupart des jeux demandent un vrai Kickstart.
+                2. Jeux et disques : ajoutez vos jeux WHDLoad (.lha), disquettes, disques durs (.hdf) et CD à la Bibliothèque. Ils sont lus sur place, sans copie, même s'ils font plusieurs Go. Un jeu WHDLoad se lance d'un toucher (▶ Jouer). Pour AGS, ajoutez tous ses .hdf d'un coup dans Disques.
+                3. Préréglage : « AGS / Workbench » pour AGS et le Workbench, « Amiga 500 » pour les vieux jeux, « CD32 » pour la console.
                 4. Allumez.
 
                 Pendant le jeu (boutons en haut à droite) :
                 ⌨  clavier Amiga : F1-F10, Help, Del, touches Amiga, flèches
                 🖱/🕹  souris tactile ou manette tactile
                 ⏸  pause · ⤓ sauvegarde rapide · ⤒ reprise rapide
-                ☰  menu : disquettes, sauvegardes, écran, réinitialisation, journal
+                ⏏  quitter le jeu (F10 ; appui long : * ou Échap)
+                ☰  menu : disquettes, sauvegardes d'état, image et captures, touches de la manette, réinitialisation, journal
 
                 Souris tactile : glisser pour déplacer le pointeur, toucher pour cliquer, toucher à deux doigts pour le clic droit, appui long puis glisser pour déplacer une fenêtre.
                 Bouton Retour du téléphone, ou F12 sur un clavier : menu.
+
+                À l'accueil aussi : Image (filtre net ou écran cathodique, pixels réguliers), Son et MIDI (bruit des lecteurs, synthé MIDI), configurations enregistrées. Appui long sur un jeu de la Bibliothèque : raccourci sur l'écran d'accueil du téléphone.
             """.trimIndent())
             .setPositiveButton("Compris", null)
             .show()
