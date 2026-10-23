@@ -90,6 +90,7 @@ class MainActivity : Activity() {
             c.addView(label("Disquette DF0:"))
             df0Text = TextView(this).also { c.addView(it) }
             c.addView(row(button("Insérer…") { pick(REQ_DF0) }, button("Éjecter") { s.df0 = ""; s.df0Name = ""; profile(); refresh() }))
+            c.addView(row(button("Disquette vierge…") { blankDisk() }))
             c.addView(label("CD de la CD32 (.iso ou .chd)"))
             cdText = TextView(this).also { c.addView(it) }
             c.addView(row(button("Choisir un CD…") { pick(REQ_CD) }))
@@ -120,6 +121,7 @@ class MainActivity : Activity() {
             c.addView(switch("Afficher la vitesse en haut de l'écran", { s.showSpeed }) { s.showSpeed = it })
             c.addView(switch("Image étirée sur toute la largeur", { s.fill }) { s.fill = it })
             c.addView(row(button("Réglages des commandes…") { ControlsDialog.show(this, s) }))
+            c.addView(row(button("Image : filtre, pixels réguliers…") { DisplayDialog.show(this, s, null) }))
         }
         // Son et MIDI
         card(col, "🔊 Son et MIDI") { c ->
@@ -278,6 +280,13 @@ class MainActivity : Activity() {
         for (it in if (libAll) shown else shown.take(8)) {
             libList.addView(LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(0, dp(2), 0, dp(2))
+                // Capture du jeu (prise en jouant, menu → Écran → Capture, ou à l'extinction)
+                Captures.of(this@MainActivity, it.name).takeIf { f -> f.exists() }?.let { f ->
+                    addView(android.widget.ImageView(this@MainActivity).apply {
+                        scaleType = android.widget.ImageView.ScaleType.CENTER_CROP
+                        setImageBitmap(android.graphics.BitmapFactory.decodeFile(f.path))
+                    }, LinearLayout.LayoutParams(dp(64), dp(48)).apply { marginEnd = dp(8) })
+                }
                 addView(TextView(this@MainActivity).apply { text = it.name.substringBeforeLast('.'); textSize = 15f }, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f))
                 when (it.kind) {
                     Library.WHD -> addView(chip("▶ Jouer") { playWhd(it) })
@@ -411,6 +420,15 @@ class MainActivity : Activity() {
             }.setNegativeButton("Annuler", null).show()
     }
 
+    /** Disquette vierge formatée, créée où l'on veut, mise dans DF0: et dans la Bibliothèque */
+    private fun blankDisk() {
+        startActivityForResult(Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE); type = "application/octet-stream"
+            putExtra(Intent.EXTRA_TITLE, "Vierge.adf")
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION or Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION)
+        }, REQ_BLANK)
+    }
+
     private fun exportUae() {
         if (!File(filesDir, "cfg/amiga.uae").exists()) { toast("Allumez l'Amiga une fois avec cette configuration, puis exportez-la"); return }
         startActivityForResult(Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
@@ -486,6 +504,12 @@ class MainActivity : Activity() {
         val uri: Uri = data.data ?: return
         val name = Disks.displayName(this, uri)
         when (req) {
+            REQ_BLANK -> {
+                if (!BlankDisk.write(this, uri, name.substringBeforeLast('.'))) { toast("Création de la disquette impossible"); return }
+                keep(uri); Library.add(this, uri.toString(), name)
+                s.df0 = uri.toString(); s.df0Name = name; profile()
+                toast("Disquette vierge $name dans DF0:")
+            }
             REQ_UAE -> toast(ConfigsIO.import(this, s, uri))
             REQ_UAE_OUT -> toast(if (ConfigsIO.export(this, s, uri)) "Configuration exportée : $name" else "Export impossible")
             REQ_CD32, REQ_CD32EXT -> {
@@ -614,6 +638,7 @@ class MainActivity : Activity() {
         const val REQ_CD = 7
         const val REQ_UAE = 8
         const val REQ_UAE_OUT = 9
+        const val REQ_BLANK = 10
         const val EXTRA_RESTART = "rallumer"
         const val ACTION_PLAY = "io.github.laurent67370.amiga1200.JOUER"
         const val EXTRA_PLAY_URI = "lien"

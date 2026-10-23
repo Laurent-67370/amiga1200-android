@@ -70,11 +70,16 @@ class EmuActivity : Activity(), SurfaceHolder.Callback {
     private var mouseKeysView: View? = null
     /** Boutons de manette changés en touches du clavier, pour ce jeu */
     private var padKeyMap: Map<Int, Int> = emptyMap()
+    /** Cadrage du jeu en cours (zoom, décalage vertical) et taille de l'image du cœur à la dernière mise en page */
+    private var zoom = 1f
+    private var shift = 0f
+    private var lastVideo = 0
     private var quitting = false
 
     override fun onCreate(state: Bundle?) {
         super.onCreate(state)
         s = Settings(this)
+        zoom = s.zoom(gameKey()); shift = s.shiftY(gameKey())
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
 
         root = object : FrameLayout(this) {
@@ -84,8 +89,16 @@ class EmuActivity : Activity(), SurfaceHolder.Callback {
                 // Clavier Amiga affiché : l'image prend la place restante au-dessus
                 val w = r - l; val h = b - t - (kb?.layoutParams?.height ?: 0)
                 var sw = w; var sh = h
-                if (!s.fill) { if (w * 3 > h * 4) sw = h * 4 / 3 else sh = w * 3 / 4 }
-                val x = (w - sw) / 2; val y = (h - sh) / 2
+                val vw = Native.videoW(); val vh = Native.videoH()
+                if (s.integer && vw > 0 && vh > 0) {
+                    // Pixels réguliers : multiple entier des pixels basse résolution (deux lignes et deux points de
+                    // l'image du cœur), au plus grand qui tient dans l'écran
+                    val n = minOf(2 * w / vw, 2 * h / vh)
+                    if (n >= 1) { sw = vw * n / 2; sh = vh * n / 2 }
+                } else if (!s.fill) { if (w * 3 > h * 4) sw = h * 4 / 3 else sh = w * 3 / 4 }
+                // Cadrage du jeu : zoom (l'image déborde, rognée par l'écran) et décalage vertical
+                sw = (sw * zoom).toInt(); sh = (sh * zoom).toInt()
+                val x = (w - sw) / 2; val y = (h - sh) / 2 + (shift * sh).toInt()
                 screen.layout(x, y, x + sw, y + sh)
             }
         }
@@ -226,13 +239,24 @@ class EmuActivity : Activity(), SurfaceHolder.Callback {
                         if (n > 0) busy / n / 1000.0 else 0.0, if (s.jit && s.model == "A1200") " · JIT" else "")
                 }
             } else info.text = if (paused) "En pause" else ""
+            // Nouvelle taille d'image (écran RTG, changement de résolution) : mise en page refaite
+            val v = Native.videoW() * 10000 + Native.videoH()
+            if (v != lastVideo) { lastVideo = v; root.requestLayout() }
             ui.postDelayed(this, 1000)
         }
     }
 
     // ---------- affichage ----------
     override fun surfaceCreated(holder: SurfaceHolder) = Native.setSurface(holder.surface)
-    override fun surfaceChanged(holder: SurfaceHolder, format: Int, w: Int, h: Int) = Native.setSurface(holder.surface)
+    override fun surfaceChanged(holder: SurfaceHolder, format: Int, w: Int, h: Int) {
+        Native.setSurface(holder.surface)
+        Native.setFilter(s.filter, w, h)
+    }
+    private fun applyDisplay() {
+        zoom = s.zoom(gameKey()); shift = s.shiftY(gameKey())
+        Native.setFilter(s.filter, screen.width, screen.height)
+        root.requestLayout()
+    }
     override fun surfaceDestroyed(holder: SurfaceHolder) = Native.setSurface(null)
 
     private fun immersive() {
@@ -282,6 +306,8 @@ class EmuActivity : Activity(), SurfaceHolder.Callback {
             add(0, 20, 0, "Touche pour quitter les jeux (⏏)…")
         }
         mm.addSubMenu(0, 101, 0, "🖥  Écran").apply {
+            add(0, 21, 0, "Image : filtre et cadrage…")
+            add(0, 22, 0, "📷 Capture d'écran")
             add(0, 8, 0, if (s.fill) "Image en 4:3" else "Image sur toute la largeur")
             add(0, 9, 0, if (s.showSpeed) "Masquer la vitesse" else "Afficher la vitesse")
         }
@@ -314,6 +340,8 @@ class EmuActivity : Activity(), SurfaceHolder.Callback {
                 16 -> ControlsDialog.show(this, s) { applyControls() }
                 19 -> PadKeys.dialog(this, gameKey(), gameTitle()) { padKeyMap = it }
                 20 -> chooseQuitKey()
+                21 -> DisplayDialog.show(this, s, gameKey()) { applyDisplay() }
+                22 -> capture(manual = true)
                 17 -> {
                     s.jit = !s.jit  // retenu pour ce disque de démarrage
                     toastShort(if (s.jit) "Redémarrage avec le JIT" else "Redémarrage sans JIT : 68020 d'origine")
@@ -409,26 +437,58 @@ class EmuActivity : Activity(), SurfaceHolder.Callback {
     // ---------- sauvegardes d'état : quatre emplacements par machine ----------
     private fun statePath(slot: Int) = File(Config.saveDir(this), "etat-${s.model}-${slot + 1}.uss")
 
-    private fun saveSlot(slot: Int) = toast(if (Native.saveState(statePath(slot).path)) "État ${slot + 1} sauvegardé" else "Sauvegarde impossible")
+    private fun thumbPath(slot: Int) = File(Config.saveDir(this), "etat-${s.model}-${slot + 1}.jpg")
+    private fun saveSlot(slot: Int) {
+        val ok = Native.saveState(statePath(slot).path)
+        // Miniature de l'écran au moment de la sauvegarde
+        if (ok) Captures.frame()?.let { Captures.saveThumb(it, thumbPath(slot)) } ?: thumbPath(slot).delete()
+        toast(if (ok) "État ${slot + 1} sauvegardé" else "Sauvegarde impossible")
+    }
     private fun loadSlot(slot: Int) {
         val f = statePath(slot)
         toast(if (f.exists() && Native.loadState(f.path)) "État ${slot + 1} repris" else "Aucun état ${slot + 1} à reprendre")
     }
 
+    /** Quatre emplacements, avec la miniature et la date de chaque sauvegarde */
     private fun states() {
-        val fmt = java.text.SimpleDateFormat("dd/MM HH:mm", Locale.FRANCE)
-        val labels = (0 until 4).map { i ->
+        val fmt = java.text.SimpleDateFormat("EEEE d MMMM, HH:mm", Locale.FRANCE)
+        val col = android.widget.LinearLayout(this).apply { orientation = android.widget.LinearLayout.VERTICAL; setPadding(dp(16), dp(6), dp(16), 0) }
+        lateinit var dlg: android.app.AlertDialog
+        for (i in 0 until 4) {
             val f = statePath(i)
-            "Emplacement ${i + 1} : " + if (f.exists()) fmt.format(java.util.Date(f.lastModified())) else "vide"
-        }.toTypedArray()
-        var chosen = 0
-        android.app.AlertDialog.Builder(this)
-            .setTitle("Sauvegardes d'état (⤓ ⤒ : emplacement 1)")
-            .setSingleChoiceItems(labels, 0) { _, w -> chosen = w }
-            .setPositiveButton("Sauvegarder") { _, _ -> saveSlot(chosen) }
-            .setNeutralButton("Reprendre") { _, _ -> loadSlot(chosen) }
-            .setNegativeButton("Fermer", null)
-            .show()
+            col.addView(android.widget.LinearLayout(this).apply {
+                orientation = android.widget.LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(0, dp(4), 0, dp(4))
+                addView(android.widget.ImageView(this@EmuActivity).apply {
+                    scaleType = android.widget.ImageView.ScaleType.FIT_CENTER
+                    setBackgroundColor(Color.rgb(30, 30, 30))
+                    thumbPath(i).takeIf { f.exists() && it.exists() }?.let { setImageBitmap(android.graphics.BitmapFactory.decodeFile(it.path)) }
+                }, android.widget.LinearLayout.LayoutParams(dp(96), dp(72)))
+                addView(TextView(this@EmuActivity).apply {
+                    text = "Emplacement ${i + 1}" + (if (i == 0) " (⤓ ⤒)" else "") + "\n" + if (f.exists()) fmt.format(java.util.Date(f.lastModified())) else "vide"
+                    setPadding(dp(10), 0, dp(6), 0); textSize = 14f
+                }, android.widget.LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+                addView(android.widget.Button(this@EmuActivity).apply { text = "⤓"; setOnClickListener { saveSlot(i); dlg.dismiss() } },
+                    android.widget.LinearLayout.LayoutParams(dp(52), ViewGroup.LayoutParams.WRAP_CONTENT))
+                addView(android.widget.Button(this@EmuActivity).apply { text = "⤒"; isEnabled = f.exists(); setOnClickListener { loadSlot(i); dlg.dismiss() } },
+                    android.widget.LinearLayout.LayoutParams(dp(52), ViewGroup.LayoutParams.WRAP_CONTENT))
+            })
+        }
+        col.addView(TextView(this).apply { text = "⤓ sauvegarder · ⤒ reprendre"; alpha = 0.7f; textSize = 12f; setPadding(0, dp(4), 0, 0) })
+        dlg = android.app.AlertDialog.Builder(this).setTitle("Sauvegardes d'état")
+            .setView(android.widget.ScrollView(this).apply { addView(col) })
+            .setNegativeButton("Fermer", null).show()
+    }
+
+    /** Capture : image du jeu dans la Bibliothèque ; à la demande, copie aussi dans la galerie du téléphone.
+     *  Sans [manual], seulement si le jeu n'a pas encore d'image (à l'extinction). */
+    private fun capture(manual: Boolean) {
+        val name = if (whdUri != null) whdName else s.bootKey()
+        val f = if (name.isNotEmpty()) Captures.of(this, name) else null
+        if (!manual && (f == null || f.exists())) return
+        val b = Captures.frame() ?: run { if (manual) toastShort("Pas encore d'image"); return }
+        if (f != null) Captures.saveThumb(b, f)
+        if (manual) toastShort(if (Captures.toGallery(this, b, name.substringBeforeLast('.').ifEmpty { "amiga" })) "Capture enregistrée (galerie : Images/Amiga1200)"
+            else if (f != null) "Capture enregistrée pour la bibliothèque" else "Capture impossible")
     }
 
     // ---------- disquettes ----------
@@ -438,7 +498,12 @@ class EmuActivity : Activity(), SurfaceHolder.Callback {
         android.app.AlertDialog.Builder(this)
             .setTitle("Disquettes")
             .setSingleChoiceItems(names, 0) { _, w -> chosen = w }
-            .setPositiveButton("Insérer…") { _, _ -> diskDrive = chosen; pickDisk() }
+            .setPositiveButton("Insérer…") { _, _ ->
+                diskDrive = chosen
+                android.app.AlertDialog.Builder(this).setTitle("DF$chosen:")
+                    .setItems(arrayOf("Choisir une disquette…", "Disquette vierge (formatée)…")) { _, i -> if (i == 0) pickDisk() else newBlankDisk() }
+                    .setNegativeButton("Annuler", null).show()
+            }
             .setNeutralButton("Éjecter") { _, _ ->
                 if (chosen < drives) Native.insertDisk(chosen, "")
                 s.setFloppy(chosen, "", "")
@@ -455,11 +520,21 @@ class EmuActivity : Activity(), SurfaceHolder.Callback {
         }, 1)
     }
 
+    /** Disquette vierge : fichier .adf créé où l'on veut (Téléchargements…), puis inséré dans le lecteur choisi */
+    private fun newBlankDisk() {
+        startActivityForResult(Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE); type = "application/octet-stream"
+            putExtra(Intent.EXTRA_TITLE, "Sauvegardes ${gameTitle()}.adf")
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION or Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION)
+        }, 2)
+    }
+
     @Deprecated("API Activity simple, sans AndroidX")
     override fun onActivityResult(req: Int, res: Int, data: Intent?) {
         super.onActivityResult(req, res, data)
         val uri: Uri = data?.data ?: return
         if (res != RESULT_OK) return
+        if (req == 2 && !BlankDisk.write(this, uri, "Sauvegardes")) { toast("Création de la disquette impossible"); return }
         try { contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION) }
         catch (_: Exception) { try { contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION) } catch (_: Exception) {} }
         val name = Disks.displayName(this, uri)
@@ -487,6 +562,7 @@ class EmuActivity : Activity(), SurfaceHolder.Callback {
 
     /** Extinction : l'état est gardé pour « Reprendre où j'en étais » (une seule fois, avec les mêmes disques) */
     private fun powerOff() {
+        if (running) capture(manual = false)   // image du jeu pour la Bibliothèque, s'il n'en a pas
         if (!running || whdUri != null) { quit(); return }  // jeu WHDLoad : ses sauvegardes sont dans WHDSaves
         setPaused(true)
         toastShort("Extinction…")
