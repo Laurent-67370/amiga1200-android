@@ -190,6 +190,7 @@ class MainActivity : Activity() {
         }
         setContentView(root)
         refresh()
+        window.decorView.post { migrateZips() }
         // Rallumage demandé une seule fois : quand Android recrée l'accueil (retour d'une extinction, mémoire libérée),
         // il lui rend la même demande, qui ne doit pas rallumer l'Amiga de nouveau
         if (state == null && intent?.action == ACTION_PLAY) { playFromShortcut(intent); intent.action = null }
@@ -352,6 +353,7 @@ class MainActivity : Activity() {
                     }
                     else -> addView(chip(if (s.hds.any { h -> h.uri == it.uri }) "✓ branché" else "+ Brancher") { useHdf(it) })
                 }
+                addView(chip("✕") { removeItem(it) })
                 setOnLongClickListener { _ -> libItemMenu(it); true }
             })
         }
@@ -366,10 +368,36 @@ class MainActivity : Activity() {
         AlertDialog.Builder(this).setTitle(it.name.substringBeforeLast('.'))
             .setItems(items.toTypedArray()) { _, i ->
                 if (canPin && i == 0) pinShortcut(it)
-                else AlertDialog.Builder(this).setTitle(it.name).setMessage("Retirer de la bibliothèque ? Le fichier lui-même n'est pas effacé.")
-                    .setPositiveButton("Retirer") { _, _ -> Library.remove(this, it.uri); refreshLibrary() }
-                    .setNegativeButton("Annuler", null).show()
+                else removeItem(it)
             }.setNegativeButton("Annuler", null).show()
+    }
+
+    /** Retrait de la Bibliothèque : le fichier de l'utilisateur reste où il est ; une copie extraite d'une archive
+     *  (dossier Disques de l'application) est effacée avec */
+    private fun removeItem(it: LibItem) {
+        val copy = Uri.parse(it.uri).takeIf { u -> u.scheme == "file" }?.path?.let { p -> File(p) }
+            ?.takeIf { f -> f.path.startsWith(ZipImport.dir(this).path) }
+        AlertDialog.Builder(this).setTitle(it.name.substringBeforeLast('.'))
+            .setMessage(if (copy != null) "Retirer de la bibliothèque ? Le disque extrait de l'archive est effacé (votre archive .zip, elle, reste)."
+                else "Retirer de la bibliothèque ? Le fichier lui-même n'est pas effacé.")
+            .setPositiveButton("Retirer") { _, _ ->
+                Library.remove(this, it.uri); copy?.delete()
+                if (s.df0 == it.uri) { s.df0 = ""; s.df0Name = "" }
+                if (s.hds.any { h -> h.uri == it.uri }) s.hds = s.hds.filter { h -> h.uri != it.uri }
+                refresh()
+            }
+            .setNegativeButton("Annuler", null).show()
+    }
+
+    /** Archives .zip rangées comme disquettes par les versions précédentes : analysées une fois (disque dur ou jeu
+     *  WHDLoad extraits, archive abîmée signalée) */
+    private fun migrateZips() {
+        val p = getSharedPreferences("bibliotheque", MODE_PRIVATE)
+        val seen = p.getStringSet("zipsVus", emptySet()) ?: emptySet()
+        val old = Library.all(this).filter { it.kind == Library.FLOPPY && it.name.endsWith(".zip", true) && it.uri !in seen }
+        if (old.isEmpty()) return
+        p.edit().putStringSet("zipsVus", seen + old.map { it.uri }).apply()
+        importZips(old.map { Uri.parse(it.uri) to it.name }) {}
     }
 
     /** Icône qui lance le jeu (WHDLoad), la disquette (machine actuelle) ou le CD (CD32) d'un toucher */
@@ -448,6 +476,8 @@ class MainActivity : Activity() {
                         if (f.kind != Library.HDF) libKind = Library.WHD else libKind = Library.HDF
                     }
                     r.problem?.let { notes += it }
+                    // Une archive déjà rangée comme disquette est remplacée par ce qu'elle contient
+                    if (r.found.isNotEmpty()) Library.remove(this, u.toString())
                     if (r.found.isEmpty() && r.problem == null) keepAsIs += u to n
                 }
                 refresh()
