@@ -302,6 +302,7 @@ class EmuActivity : Activity(), SurfaceHolder.Callback {
             add(0, 14, 0, if (s.azerty) "Lettres en QWERTY" else "Lettres en AZERTY")
             add(0, 13, 0, "Clavier du téléphone")
             add(0, 16, 0, "Réglages des commandes…")
+            add(0, 23, 0, "Disposition de la manette tactile…")
             add(0, 19, 0, "Touches de la manette (ce jeu)…")
             add(0, 20, 0, "Touche pour quitter les jeux (⏏)…")
         }
@@ -342,6 +343,7 @@ class EmuActivity : Activity(), SurfaceHolder.Callback {
                 20 -> chooseQuitKey()
                 21 -> DisplayDialog.show(this, s, gameKey()) { applyDisplay() }
                 22 -> capture(manual = true)
+                23 -> editPad()
                 17 -> {
                     s.jit = !s.jit  // retenu pour ce disque de démarrage
                     toastShort(if (s.jit) "Redémarrage avec le JIT" else "Redémarrage sans JIT : 68020 d'origine")
@@ -364,6 +366,72 @@ class EmuActivity : Activity(), SurfaceHolder.Callback {
         setTouchPad(s.touchPad)
         modeBtn.text = if (s.touchPad) "🕹" else "🖱"
         toastShort(if (s.touchPad) "Manette tactile : joystick à gauche, tir à droite" else "Souris tactile : glisser, toucher pour cliquer")
+    }
+
+    // ---------- disposition de la manette tactile ----------
+    private var padBar: View? = null
+
+    /** Boutons déplacés au doigt, ajoutés (touches du clavier Amiga), agrandis ou retirés ; l'Amiga attend en pause */
+    private fun editPad() {
+        if (!s.touchPad) { s.touchPad = true; modeBtn.text = "🕹"; setTouchPad(true) }
+        val p = pad ?: return
+        val wasPaused = paused
+        setPaused(true)
+        p.editing = true
+        bar.visibility = View.GONE
+        fun tool(t: String, f: () -> Unit) = TextView(this).apply {
+            text = t; textSize = 15f; setTextColor(Color.WHITE)
+            background = android.graphics.drawable.GradientDrawable().apply { cornerRadius = dp(16).toFloat(); setColor(Color.argb(200, 52, 56, 68)) }
+            setPadding(dp(12), dp(7), dp(12), dp(7))
+            setOnClickListener { f() }
+        }
+        val title = TextView(this).apply { setTextColor(Color.WHITE); setShadowLayer(3f, 0f, 0f, Color.BLACK); textSize = 13f; gravity = Gravity.CENTER }
+        fun showSel(b: PadButton?) { title.text = if (b == null) "Touchez un bouton pour le choisir, faites-le glisser pour le déplacer" else "Bouton choisi : ${b.label}" }
+        p.onSelect = { showSel(it) }
+        showSel(null)
+        fun done() {
+            p.editing = false
+            p.onSelect = {}
+            padBar?.let { root.removeView(it) }; padBar = null
+            bar.visibility = View.VISIBLE
+            setPaused(wasPaused)
+        }
+        fun resize(f: Float) { p.selected?.let { it.size = (it.size * f).coerceIn(0.5f, 2.2f); p.invalidate() } ?: toastShort("Choisissez d'abord un bouton") }
+        val row = android.widget.LinearLayout(this).apply {
+            orientation = android.widget.LinearLayout.HORIZONTAL
+            val gap = dp(6)
+            fun add(v: View) = addView(v, android.widget.LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { marginEnd = gap })
+            add(tool("+ Bouton") {
+                // Tir 1 et tir 2 s'ils ont été retirés, puis les touches du clavier Amiga
+                val choices = listOf(PadLayout.FIRE1, PadLayout.FIRE2).filter { k -> p.layout.none { it.key == k } } + PadKeys.keys.drop(1).map { it.first }
+                android.app.AlertDialog.Builder(this@EmuActivity).setTitle("Ajouter un bouton")
+                    .setItems(choices.map { PadButton(it, 0f, 0f).label }.toTypedArray()) { _, i ->
+                        val b = PadButton(choices[i], 0.5f, 0.45f, 0.8f)
+                        p.layout.add(b); p.select(b)
+                    }.setNegativeButton("Annuler", null).show()
+            })
+            add(tool("−") { resize(1 / 1.15f) })
+            add(tool("+") { resize(1.15f) })
+            add(tool("Retirer") { p.selected?.let { b -> p.layout.remove(b); p.select(null) } ?: toastShort("Choisissez d'abord un bouton") })
+            add(tool("Par défaut") { p.layout = PadLayout.default(); p.select(null) })
+            add(tool("Annuler") { p.layout = PadLayout.load(this@EmuActivity, gameKey()); done() })
+            add(tool("✓ Enregistrer") {
+                android.app.AlertDialog.Builder(this@EmuActivity).setTitle("Enregistrer la disposition")
+                    .setItems(arrayOf("Pour ce jeu (${gameTitle()})", "Pour tous les jeux")) { _, i ->
+                        PadLayout.save(this@EmuActivity, gameKey(), p.layout, forAll = i == 1)
+                        toastShort(if (i == 1) "Disposition enregistrée pour tous les jeux" else "Disposition enregistrée pour ${gameTitle()}")
+                        done()
+                    }.setNegativeButton("Retour", null).show()
+            })
+        }
+        val box = android.widget.LinearLayout(this).apply {
+            orientation = android.widget.LinearLayout.VERTICAL; gravity = Gravity.CENTER_HORIZONTAL
+            setPadding(dp(8), dp(8), dp(8), dp(4))
+            addView(android.widget.HorizontalScrollView(this@EmuActivity).apply { addView(row) })
+            addView(title)
+        }
+        padBar = box
+        root.addView(box, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.TOP or Gravity.CENTER_HORIZONTAL))
     }
 
     private fun confirm(title: String, msg: String, ok: () -> Unit) {
@@ -693,7 +761,7 @@ class EmuActivity : Activity(), SurfaceHolder.Callback {
         pad = null
         touchAxes = 0
         if (on) {
-            pad = TouchPad(this, s.padSize).also {
+            pad = TouchPad(this, s.padSize, PadLayout.load(this, gameKey())).also {
                 root.addView(it, 2, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
             }
         }
