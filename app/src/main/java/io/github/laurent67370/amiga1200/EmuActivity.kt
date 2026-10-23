@@ -190,7 +190,12 @@ class EmuActivity : Activity(), SurfaceHolder.Callback {
         val cd = if (Config.cdConsole(s.model)) Disks.link(this, s.cd, s.cdName).also {
             if (s.cd.isNotEmpty() && it == null) toast("CD ${s.cdName} : accès refusé, choisissez-le à nouveau")
         } else null
-        val hds = if (Config.cdConsole(s.model)) emptyList() else s.hds.mapIndexedNotNull { i, h ->
+        // Disquette avec un Kickstart 1.x (jeux A500) : les disques durs restent débranchés. Leurs partitions et leurs
+        // systèmes de fichiers (AGS…) prendraient la mémoire dont les jeux de l'époque ont besoin (erreur 103)
+        val kick = if (s.rom == "user") Kickstarts.best(this, s.model) else null
+        val floppyBoot = floppies[0] != null && kick != null && kick.version in 1..35
+        if (floppyBoot && s.hds.isNotEmpty()) toast("Disquette avec le ${kick!!.label} : disques durs non branchés, pour laisser sa mémoire au jeu")
+        val hds = if (Config.cdConsole(s.model) || floppyBoot) emptyList() else s.hds.mapIndexedNotNull { i, h ->
             // Nom précédé du numéro : deux disques de même nom venant de dossiers différents restent distincts
             Disks.link(this, h.uri, "dh$i-${h.name}").also { if (it == null) toast("Disque dur ${h.name} : accès refusé, choisissez-le à nouveau") }
         }
