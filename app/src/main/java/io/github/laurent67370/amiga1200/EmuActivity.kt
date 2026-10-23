@@ -154,6 +154,11 @@ class EmuActivity : Activity(), SurfaceHolder.Callback {
     /** Jeu WHDLoad lancé depuis la Bibliothèque (archive .lha) : le cœur le monte et le démarre lui-même */
     private val whdUri get() = intent.getStringExtra(EXTRA_WHD_URI)
     private val whdName get() = intent.getStringExtra(EXTRA_WHD_NAME) ?: "jeu.lha"
+    /** Jeu installé sur un .hdf qui démarre WHDLoad tout seul (archive .zip analysée) */
+    private val hdfUri get() = intent.getStringExtra(EXTRA_HDF_URI)
+    private val hdfName get() = intent.getStringExtra(EXTRA_HDF_NAME) ?: "jeu.hdf"
+    /** Nom du jeu lancé directement (WHDLoad, en .lha ou sur .hdf), ou null pour la machine de l'accueil */
+    private val gameFile get() = if (whdUri != null) whdName else if (hdfUri != null) hdfName else null
 
     private fun boot() {
         Native.setLogFile(logFile().path)
@@ -163,6 +168,10 @@ class EmuActivity : Activity(), SurfaceHolder.Callback {
             WhdBoot.ensure(this)
             Native.log("WHDLoad : $whdName")
             Disks.link(this, uri, Disks.safe(whdName)) ?: run { fail("le jeu $whdName est illisible, choisissez-le à nouveau"); return }
+        } ?: hdfUri?.let { uri ->
+            Native.log("WHDLoad sur disque dur : $hdfName")
+            val hd = Disks.link(this, uri, "dh0-" + hdfName) ?: run { fail("le disque $hdfName est illisible, ajoutez-le à nouveau"); return }
+            Config.write(this, s, listOf(null, null, null, null), listOf(hd), null, null, whdHdf = true).path
         } ?: machineConfig()
         Native.setDirs(Config.sysDir(this).path, Config.saveDir(this).path)
         padKeyMap = PadKeys.load(this, gameKey())
@@ -323,7 +332,7 @@ class EmuActivity : Activity(), SurfaceHolder.Callback {
             add(0, 12, 0, "Journal (diagnostic)")
             add(0, 15, 0, "Aide")
         }
-        if (Config.bigBox(s.model) && whdUri == null) mm.add(0, 17, 0, if (s.jit) "⚡  Redémarrer sans JIT (démos)" else "⚡  Redémarrer avec le JIT")
+        if (Config.bigBox(s.model) && gameFile == null) mm.add(0, 17, 0, if (s.jit) "⚡  Redémarrer sans JIT (démos)" else "⚡  Redémarrer avec le JIT")
         mm.add(0, 10, 0, "↺  Réinitialiser l'Amiga")
         mm.add(0, 11, 0, "⏻  Éteindre")
         m.setOnMenuItemClickListener {
@@ -557,7 +566,7 @@ class EmuActivity : Activity(), SurfaceHolder.Callback {
     /** Capture : image du jeu dans la Bibliothèque ; à la demande, copie aussi dans la galerie du téléphone.
      *  Sans [manual], seulement si le jeu n'a pas encore d'image (à l'extinction). */
     private fun capture(manual: Boolean) {
-        val name = if (whdUri != null) whdName else s.bootKey()
+        val name = gameFile ?: s.bootKey()
         val f = if (name.isNotEmpty()) Captures.of(this, name) else null
         if (!manual && (f == null || f.exists())) return
         val b = Captures.frame() ?: run { if (manual) toastShort("Pas encore d'image"); return }
@@ -631,6 +640,7 @@ class EmuActivity : Activity(), SurfaceHolder.Callback {
             addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
             putExtra(MainActivity.EXTRA_RESTART, true)
             whdUri?.let { putExtra(EXTRA_WHD_URI, it); putExtra(EXTRA_WHD_NAME, whdName) }
+            hdfUri?.let { putExtra(EXTRA_HDF_URI, it); putExtra(EXTRA_HDF_NAME, hdfName) }
         })
         quit()
     }
@@ -638,7 +648,7 @@ class EmuActivity : Activity(), SurfaceHolder.Callback {
     /** Extinction : l'état est gardé pour « Reprendre où j'en étais » (une seule fois, avec les mêmes disques) */
     private fun powerOff() {
         if (running) capture(manual = false)   // image du jeu pour la Bibliothèque, s'il n'en a pas
-        if (!running || whdUri != null) { quit(); return }  // jeu WHDLoad : ses sauvegardes sont dans WHDSaves
+        if (!running || gameFile != null) { quit(); return }  // jeu WHDLoad : ses sauvegardes sont sur son disque
         setPaused(true)
         toastShort("Extinction…")
         Thread {
@@ -655,8 +665,8 @@ class EmuActivity : Activity(), SurfaceHolder.Callback {
     }
 
     /** Jeu en cours, pour les réglages qui lui sont propres : l'archive WHDLoad, sinon le disque de démarrage */
-    private fun gameKey() = whdUri?.let { "whd:$whdName" } ?: "disque:${s.bootKey()}"
-    private fun gameTitle() = (if (whdUri != null) whdName else s.bootKey().ifEmpty { "Amiga" }).substringBeforeLast('.')
+    private fun gameKey() = gameFile?.let { "whd:$it" } ?: "disque:${s.bootKey()}"
+    private fun gameTitle() = (gameFile ?: s.bootKey().ifEmpty { "Amiga" }).substringBeforeLast('.')
 
     private val quitKeys = listOf(291 to "F10", 268 to "* du pavé numérique (Impr. écran sur PC)", 27 to "Échap")
     private fun quitGame() {
@@ -847,6 +857,8 @@ class EmuActivity : Activity(), SurfaceHolder.Callback {
         const val EXTRA_RESUME = "reprendre"
         const val EXTRA_WHD_URI = "whd"
         const val EXTRA_WHD_NAME = "whdNom"
+        const val EXTRA_HDF_URI = "hdfWhd"
+        const val EXTRA_HDF_NAME = "hdfWhdNom"
     }
     private fun toast(t: String) = Toast.makeText(this, t, Toast.LENGTH_LONG).show()
     private fun toastShort(t: String) = Toast.makeText(this, t, Toast.LENGTH_SHORT).show()

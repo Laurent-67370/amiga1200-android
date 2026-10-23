@@ -196,8 +196,10 @@ class MainActivity : Activity() {
         else if (state == null && intent?.getBooleanExtra(EXTRA_RESTART, false) == true) {
             val uri = intent.getStringExtra(EmuActivity.EXTRA_WHD_URI)
             val name = intent.getStringExtra(EmuActivity.EXTRA_WHD_NAME)
+            val hdf = intent.getStringExtra(EmuActivity.EXTRA_HDF_URI)
+            val hdfName = intent.getStringExtra(EmuActivity.EXTRA_HDF_NAME)
             intent.removeExtra(EXTRA_RESTART)
-            window.decorView.postDelayed({ power(uri, name) }, 1200)
+            window.decorView.postDelayed({ if (hdf != null) relaunchHdf(hdf, hdfName) else power(uri, name) }, 1200)
         }
         else if (!getSharedPreferences("aide", MODE_PRIVATE).getBoolean("vue", false)) {
             getSharedPreferences("aide", MODE_PRIVATE).edit().putBoolean("vue", true).apply()
@@ -305,7 +307,7 @@ class MainActivity : Activity() {
         val items = Library.all(this)
         libTabs.removeAllViews()
         for ((kind, label) in listOf(Library.WHD to "🎮 Jeux", Library.FLOPPY to "💾 Disq.", Library.HDF to "🗄 HDF", Library.CD to "💿 CD")) {
-            val n = items.count { it.kind == kind }
+            val n = items.count { it.kind == kind || (kind == Library.WHD && it.kind == Library.WHDHDF) }
             libTabs.addView(TextView(this).apply {
                 text = if (n > 0) "$label ($n)" else label; textSize = 13f; gravity = Gravity.CENTER
                 setPadding(dp(8), dp(6), dp(8), dp(6))
@@ -315,7 +317,7 @@ class MainActivity : Activity() {
             }, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f).apply { marginEnd = dp(4) })
         }
         libList.removeAllViews()
-        val shown = items.filter { it.kind == libKind }
+        val shown = items.filter { it.kind == libKind || (libKind == Library.WHD && it.kind == Library.WHDHDF) }
         if (shown.isEmpty()) {
             libList.addView(TextView(this).apply {
                 alpha = 0.7f
@@ -341,6 +343,7 @@ class MainActivity : Activity() {
                 addView(TextView(this@MainActivity).apply { text = it.name.substringBeforeLast('.'); textSize = 15f }, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f))
                 when (it.kind) {
                     Library.WHD -> addView(chip("▶ Jouer") { playWhd(it) })
+                    Library.WHDHDF -> addView(chip("▶ Jouer") { playWhdHdf(it) })
                     Library.FLOPPY -> addView(chip("DF0:") { useFloppy(it) })
                     Library.CD -> {
                         // CDTV proposé dès que son extension est installée ; sinon la CD32
@@ -398,11 +401,60 @@ class MainActivity : Activity() {
                 if (busy && System.currentTimeMillis() - t0 < 4000) { view.postDelayed(this, 150); return }
                 when (item.kind) {
                     Library.WHD -> playWhd(item)
+                    Library.WHDHDF -> playWhdHdf(item)
                     Library.CD -> playCd(item)
                     Library.FLOPPY -> { useFloppy(item); power() }
                 }
             }
         })
+    }
+
+    /** Jeu installé sur un .hdf qui démarre WHDLoad tout seul : un A1200 avec Kickstart 3.x et 8 Mo de Fast, ce seul disque */
+    private fun playWhdHdf(it: LibItem) {
+        if (!whdKickstart()) return
+        Library.touch(this, it.uri)
+        startActivity(Intent(this, EmuActivity::class.java).putExtra(EmuActivity.EXTRA_HDF_URI, it.uri).putExtra(EmuActivity.EXTRA_HDF_NAME, it.name))
+    }
+
+    private fun relaunchHdf(uri: String, name: String?) =
+        startActivity(Intent(this, EmuActivity::class.java).putExtra(EmuActivity.EXTRA_HDF_URI, uri).putExtra(EmuActivity.EXTRA_HDF_NAME, name))
+
+    private fun whdKickstart(): Boolean {
+        if (Kickstarts.hasForWhd(this)) return true
+        AlertDialog.Builder(this).setTitle("Kickstart nécessaire")
+            .setMessage("WHDLoad a besoin d'un vrai Kickstart (3.1 de l'A1200 de préférence) : AROS ne lui suffit pas. Choisissez votre fichier ROM dans la carte Kickstart.")
+            .setPositiveButton("Choisir…") { _, _ -> pick(REQ_ROM) }.setNegativeButton("Annuler", null).show()
+        return false
+    }
+
+    /** Archives .zip analysées dans un fil à part : disque dur ou jeu WHDLoad extraits et rangés selon ce qu'ils sont ;
+     *  [floppies] reçoit celles qui sont des disquettes (gardées telles quelles) */
+    private fun importZips(zips: List<Pair<Uri, String>>, floppies: (List<Pair<Uri, String>>) -> Unit) {
+        val wait = AlertDialog.Builder(this).setTitle("Analyse des archives").setMessage("Patientez…").setCancelable(false).show()
+        Thread {
+            val results = zips.map { (u, n) -> Triple(u, n, ZipImport.inspect(this, u, n)) }
+            runOnUiThread {
+                wait.dismiss()
+                val keepAsIs = mutableListOf<Pair<Uri, String>>()
+                val notes = mutableListOf<String>()
+                for ((u, n, r) in results) {
+                    for (f in r.found) {
+                        Library.add(this, Uri.fromFile(f.file).toString(), f.file.name, f.kind)
+                        notes += f.file.name + when (f.kind) {
+                            Library.WHDHDF -> " : jeu WHDLoad sur disque dur, rangé dans Jeux (▶ Jouer)"
+                            Library.WHD -> " : jeu WHDLoad, rangé dans Jeux"
+                            else -> " : disque dur, rangé dans HDF"
+                        }
+                        if (f.kind != Library.HDF) libKind = Library.WHD else libKind = Library.HDF
+                    }
+                    r.problem?.let { notes += it }
+                    if (r.found.isEmpty() && r.problem == null) keepAsIs += u to n
+                }
+                refresh()
+                if (notes.isNotEmpty()) AlertDialog.Builder(this).setTitle("Archives").setMessage(notes.joinToString("\n\n")).setPositiveButton("OK", null).show()
+                floppies(keepAsIs)
+            }
+        }.start()
     }
 
     private fun playWhd(it: LibItem) {
@@ -692,13 +744,30 @@ class MainActivity : Activity() {
         if (req == REQ_LIB) {
             val uris = data.clipData?.let { c -> (0 until c.itemCount).map { c.getItemAt(it).uri } } ?: listOfNotNull(data.data)
             var last = Library.WHD
+            val zips = mutableListOf<Pair<Uri, String>>()
+            val hdfs = mutableListOf<Pair<Uri, String>>()
             for (u in uris) {
                 val n = Disks.displayName(this, u)
                 // Un Kickstart choisi avec les jeux : installé comme ROM de la machine, pas rangé en disquette
                 if (Library.kindOf(n) == Library.ROM) { installRom(u, n); continue }
-                keep(u); Library.add(this, u.toString(), n); last = Library.kindOf(n)
+                keep(u)
+                // Archive .zip : son contenu décide (disque dur, jeu WHDLoad ou disquette)
+                if (n.endsWith(".zip", true)) { zips += u to n; continue }
+                // Petit .hdf qui démarre WHDLoad tout seul : rangé avec les jeux
+                if (Library.kindOf(n) == Library.HDF) { hdfs += u to n; continue }
+                Library.add(this, u.toString(), n); last = Library.kindOf(n)
             }
             libKind = last
+            for ((u, n) in hdfs) Library.add(this, u.toString(), n)
+            if (hdfs.isNotEmpty()) Thread {
+                val games = hdfs.filter { (u, _) -> ZipImport.bootsWhdload(this, u) }
+                if (games.isNotEmpty()) runOnUiThread {
+                    for ((u, n) in games) Library.add(this, u.toString(), n, Library.WHDHDF)
+                    libKind = Library.WHD; refresh()
+                    toast(games.joinToString(", ") { it.second } + " : jeu WHDLoad sur disque dur, rangé dans Jeux (▶ Jouer)")
+                }
+            }.start()
+            if (zips.isNotEmpty()) importZips(zips) { fl -> for ((u, n) in fl) Library.add(this, u.toString(), n, Library.FLOPPY); if (fl.isNotEmpty()) libKind = Library.FLOPPY; refresh() }
             toast("${uris.size} fichier${if (uris.size > 1) "s" else ""} ajouté${if (uris.size > 1) "s" else ""} à la bibliothèque")
             refresh()
             return
@@ -749,7 +818,15 @@ class MainActivity : Activity() {
             REQ_ROM -> installRom(uri, name)
             REQ_DF0 -> {
                 if (Library.kindOf(name) == Library.ROM) { installRom(uri, name); refresh(); return }
-                keep(uri); Library.add(this, uri.toString(), name)
+                keep(uri)
+                if (name.endsWith(".zip", true)) {
+                    importZips(listOf(uri to name)) { fl ->
+                        if (fl.isEmpty()) return@importZips
+                        Library.add(this, uri.toString(), name, Library.FLOPPY); s.df0 = uri.toString(); s.df0Name = name; profile(); refresh()
+                    }
+                    return
+                }
+                Library.add(this, uri.toString(), name)
                 // Une archive WHDLoad choisie comme disquette : elle se lance comme un jeu
                 if (Library.kindOf(name) == Library.WHD) { libKind = Library.WHD; refresh(); playWhd(Library.all(this).first { it.uri == uri.toString() }); return }
                 s.df0 = uri.toString(); s.df0Name = name; profile()
@@ -801,7 +878,9 @@ class MainActivity : Activity() {
         super.onNewIntent(intent)
         if (intent.action == ACTION_PLAY) { playFromShortcut(intent); return }
         if (intent.getBooleanExtra(EXTRA_RESTART, false)) window.decorView.postDelayed({
-            power(intent.getStringExtra(EmuActivity.EXTRA_WHD_URI), intent.getStringExtra(EmuActivity.EXTRA_WHD_NAME))
+            val hdf = intent.getStringExtra(EmuActivity.EXTRA_HDF_URI)
+            if (hdf != null) relaunchHdf(hdf, intent.getStringExtra(EmuActivity.EXTRA_HDF_NAME))
+            else power(intent.getStringExtra(EmuActivity.EXTRA_WHD_URI), intent.getStringExtra(EmuActivity.EXTRA_WHD_NAME))
         }, 1200)
     }
 

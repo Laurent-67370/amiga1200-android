@@ -33,6 +33,10 @@ les réglages, la Bibliothèque et les sauvegardes.
   dans la Bibliothèque.
 - **Jeux WHDLoad en un geste** : une archive `.lha` de la Bibliothèque se lance d'un toucher. Le cœur Amiberry monte
   le jeu, applique ses réglages (base de jeux d'Amiberry) et garde ses sauvegardes. Il faut un vrai Kickstart.
+- **Archives .zip analysées** : un disque dur (.hdf) ou un jeu WHDLoad (.lha) zippé est extrait dans
+  `Android/data/io.github.laurent67370.amiga1200/files/Disques` et rangé selon ce qu'il est ; une archive incomplète
+  est signalée ; les disquettes zippées restent lues telles quelles. Un petit **.hdf qui démarre WHDLoad tout seul**
+  (jeu installé sur disque dur) devient un jeu : ▶ Jouer le démarre sur un A1200 avec Kickstart 3.x et 8 Mo de Fast.
 - **Bibliothèque** : jeux WHDLoad, disquettes, disques durs et CD déjà choisis, retrouvés d'un toucher, avec l'image
   du jeu. Appui long : raccourci sur l'écran d'accueil d'Android, ou retrait.
 - **Quatre lecteurs de disquettes** (DF0: à DF3:, ADF, DMS, IPF…), disquettes changées en cours de partie, et
