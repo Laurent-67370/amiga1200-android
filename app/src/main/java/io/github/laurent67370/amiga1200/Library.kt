@@ -14,6 +14,8 @@ object Library {
     const val FLOPPY = "floppy"
     const val HDF = "hdf"
     const val CD = "cd"
+    /** Disque dur qui démarre WHDLoad tout seul (jeu installé sur un petit .hdf) : rangé avec les jeux */
+    const val WHDHDF = "whdhdf"
     /** Kickstart : jamais rangé dans la Bibliothèque, installé comme ROM de la machine */
     const val ROM = "rom"
 
@@ -40,12 +42,12 @@ object Library {
         prefs(ctx).edit().putString("items", a.toString()).commit()
     }
 
-    /** Ajouté (ou rafraîchi) ; le type vient de l'extension */
-    fun add(ctx: Context, uri: String, name: String) {
+    /** Ajouté (ou rafraîchi) ; le type vient de l'extension, sauf s'il est donné (contenu d'une archive analysé) */
+    fun add(ctx: Context, uri: String, name: String, kind: String = kindOf(name)) {
         if (kindOf(name) == ROM) return
         val list = all(ctx).filter { it.uri != uri }.toMutableList()
         val old = all(ctx).firstOrNull { it.uri == uri }
-        list += LibItem(uri, name, kindOf(name), old?.added ?: System.currentTimeMillis(), old?.used ?: 0)
+        list += LibItem(uri, name, kind, old?.added ?: System.currentTimeMillis(), old?.used ?: 0)
         save(ctx, list)
     }
 

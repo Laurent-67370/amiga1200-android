@@ -217,9 +217,21 @@ object Config {
     fun bigBox(model: String) = model == "A1200" || model == "A3000" || model == "A4000"
     fun cdConsole(model: String) = model == "CD32" || model == "CDTV"
 
-    fun write(ctx: Context, s: Settings, floppies: List<String?>, hds: List<String>, shared: File?, cd: String?): File {
+    /** Disque dur avec table de partitions (RDB, comme AGS) ; sinon l'image d'une seule partition, qui demande sa
+     *  géométrie (32 secteurs, 1 tête, 2 blocs réservés, comme le cœur pour un .hdf lancé seul) */
+    fun hasRdb(path: String): Boolean = try {
+        File(path).inputStream().use { i ->
+            val b = ByteArray(16 * 512); var n = 0
+            while (n < b.size) { val r = i.read(b, n, b.size - n); if (r <= 0) break; n += r }
+            (0 until n / 512).any { k -> String(b, k * 512, 4, Charsets.ISO_8859_1) == "RDSK" }
+        }
+    } catch (_: Exception) { true }
+
+    /** [whdHdf] : jeu installé sur un .hdf qui démarre WHDLoad tout seul. Machine de WHDLoad, quelle que soit celle de
+     *  l'accueil : A1200 (68020) avec son Kickstart 3.x et 8 Mo de Fast pour le Preload, sans JIT ni carte RTG */
+    fun write(ctx: Context, s: Settings, floppies: List<String?>, hds: List<String>, shared: File?, cd: String?, whdHdf: Boolean = false): File {
         val sys = sysDir(ctx)
-        val model = s.model
+        val model = if (whdHdf) "A1200" else s.model
         val l = mutableListOf("quickstart=$model,0")
         if (model == "CD32") {
             // CD32 : la console telle qu'elle est, avec ses propres ROM (512 Ko + extension, ou ROM complète de 1 Mo)
@@ -238,8 +250,8 @@ object Config {
             l += listOf("ntsc=${s.ntsc}", "gfx_resolution=hires")
         } else {
             // Le Kickstart qui convient à cette machine parmi ceux installés ; sinon AROS
-            val kick = if (s.rom == "user") Kickstarts.best(ctx, model) else null
-            s.romName = kick?.label ?: ""
+            val kick = if (s.rom == "user" || whdHdf) Kickstarts.best(ctx, model) else null
+            if (!whdHdf) s.romName = kick?.label ?: ""
             if (kick != null) l += "kickstart_rom_file=${kick.file.path}"
             else {
                 aros(ctx)
@@ -256,7 +268,8 @@ object Config {
             // Bruits des lecteurs (échantillons d'Amiberry copiés dans files/data/floppy_sounds)
             if (s.floppySound) for (i in 0 until n) l += "floppy${i}sound=1"
             floppies.forEachIndexed { i, f -> if (f != null && i < n) l += "floppy$i=$f" }
-            if (s.jit && bigBox(model)) {
+            if (whdHdf) l += "fastmem_size=8"
+            if (s.jit && bigBox(model) && !whdHdf) {
                 // JIT : 68040 traduit en code ARM64, à pleine vitesse, avec 64 Mo de Fast Zorro III
                 l += listOf(
                     "cpu_model=68040", "fpu_model=68040", "cpu_24bit_addressing=false",
@@ -269,13 +282,16 @@ object Config {
             l += "ntsc=${s.ntsc}"
             l += "gfx_resolution=hires"
             // Carte RTG sur le Zorro III : il lui faut un processeur 32 bits (le 68EC020 de l'A1200 n'adresse que 16 Mo)
-            if (s.rtg && bigBox(model)) {
+            if (s.rtg && bigBox(model) && !whdHdf) {
                 l += listOf("gfxcard_type=ZorroIII", "gfxcard_size=32")
                 if (!s.jit && model == "A1200") l += listOf("cpu_model=68020", "cpu_24bit_addressing=false")
             }
             // Disques durs sur le pilote d'UAE (uaehf.device) : démarrent AGS et les Workbench préinstallés.
             // Les disques RDB gardent les noms et priorités de démarrage de leurs partitions.
-            hds.forEachIndexed { i, path -> l += "hardfile2=rw,DH$i:$path,0,0,0,512,${if (i == 0) 0 else -1},,uae$i" }
+            hds.forEachIndexed { i, path ->
+                val geo = if (hasRdb(path)) "0,0,0,512" else "32,1,2,512"
+                l += "hardfile2=rw,DH$i:$path,$geo,${if (i == 0) 0 else -1},,uae$i"
+            }
             // SHARED: : jamais un disque de démarrage
             if (shared != null) l += "filesystem2=rw,DH12:SHARED:${shared.path},-128"
             // Sans disque dur, ni ROM de démarrage ni carte d'UAE, comme la version web : la machine d'origine, toute sa mémoire au jeu
