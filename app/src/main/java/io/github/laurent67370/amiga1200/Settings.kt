@@ -278,6 +278,8 @@ object Config {
             hds.forEachIndexed { i, path -> l += "hardfile2=rw,DH$i:$path,0,0,0,512,${if (i == 0) 0 else -1},,uae$i" }
             // SHARED: : jamais un disque de démarrage
             if (shared != null) l += "filesystem2=rw,DH12:SHARED:${shared.path},-128"
+            // Sans disque dur, ni ROM de démarrage ni carte d'UAE, comme la version web : la machine d'origine, toute sa mémoire au jeu
+            if (hds.isEmpty() && shared == null) l += listOf("boot_rom_uae=disabled", "uaeboard=disabled")
         }
         // MIDI du port série vers l'application (android.media.midi), comme la version web
         if (s.midi) {
