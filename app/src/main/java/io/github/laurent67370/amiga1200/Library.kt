@@ -14,8 +14,11 @@ object Library {
     const val FLOPPY = "floppy"
     const val HDF = "hdf"
     const val CD = "cd"
+    /** Kickstart : jamais rangé dans la Bibliothèque, installé comme ROM de la machine */
+    const val ROM = "rom"
 
-    fun kindOf(name: String): String = when (name.substringAfterLast('.', "").lowercase()) {
+    fun kindOf(name: String): String = if (name.lowercase().contains("kickstart")) ROM else when (name.substringAfterLast('.', "").lowercase()) {
+        "rom" -> ROM
         "lha", "lzh" -> WHD
         "hdf", "hdz", "vhd" -> HDF
         "iso", "chd", "cue", "ccd", "nrg", "mds" -> CD
@@ -28,7 +31,7 @@ object Library {
         val a = try { JSONArray(prefs(ctx).getString("items", "[]")) } catch (_: Exception) { JSONArray() }
         return (0 until a.length()).map { a.getJSONObject(it) }.map {
             LibItem(it.getString("uri"), it.getString("name"), it.optString("kind", kindOf(it.getString("name"))), it.optLong("added"), it.optLong("used"))
-        }.sortedByDescending { maxOf(it.used, it.added) }
+        }.filter { it.kind != ROM && kindOf(it.name) != ROM }.sortedByDescending { maxOf(it.used, it.added) }
     }
 
     private fun save(ctx: Context, items: List<LibItem>) {
@@ -39,6 +42,7 @@ object Library {
 
     /** Ajouté (ou rafraîchi) ; le type vient de l'extension */
     fun add(ctx: Context, uri: String, name: String) {
+        if (kindOf(name) == ROM) return
         val list = all(ctx).filter { it.uri != uri }.toMutableList()
         val old = all(ctx).firstOrNull { it.uri == uri }
         list += LibItem(uri, name, kindOf(name), old?.added ?: System.currentTimeMillis(), old?.used ?: 0)
