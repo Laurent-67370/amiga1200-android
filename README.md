@@ -21,14 +21,15 @@ les réglages, la Bibliothèque et les sauvegardes.
 ## Ce que fait l'application
 
 ### Machines et disques
-- **Machines** : Amiga 500, 600, 1200, 4000 et CD32 (CD en .iso ou .chd, avec la ROM de la console et sa manette à
-  7 boutons). Préréglages en un geste sur l'accueil : AGS / Workbench, A1200 d'origine, Amiga 500, CD32.
-- **JIT** (A1200, A4000) : 68040 avec FPU traduit en code ARM64, vitesse maximale, 64 Mo de mémoire Fast Zorro III.
+- **Machines** : Amiga 500, 600, 1200, 3000, 4000, CD32 (CD en .iso ou .chd, avec la ROM de la console et sa manette à
+  7 boutons) et **CDTV** (CD en .iso ou .chd, avec un Kickstart 1.3 et l'extension du CDTV). Préréglages en un geste
+  sur l'accueil : AGS / Workbench, A1200 d'origine, Amiga 500, CD32.
+- **JIT** (A1200, A3000, A4000) : 68040 avec FPU traduit en code ARM64, vitesse maximale, 64 Mo de mémoire Fast Zorro III.
   « Redémarrer sans JIT » (menu) retrouve un 68020 d'origine pour les démos qui n'aiment pas le 68040 ; le choix est
   retenu pour le disque de démarrage.
 - **Kickstart** : les vôtres, **plusieurs à la fois**, reconnus à leur contenu (somme CRC et version) : chacun sert
-  automatiquement à la machine qui lui convient (1.3 pour l'Amiga 500, 3.1 pour l'A1200…), et l'accueil prévient si
-  aucun ne convient. Sinon, la ROM libre **AROS** fournie. Un Kickstart ajouté avec les jeux est installé, pas rangé
+  automatiquement à la machine qui lui convient (1.3 pour l'Amiga 500 et le CDTV, 3.1 pour l'A1200, 3.1.4 et 3.2
+  compris…), et l'accueil prévient si aucun ne convient. L'extension du CDTV s'ajoute de la même façon. Sinon, la ROM libre **AROS** fournie. Un Kickstart ajouté avec les jeux est installé, pas rangé
   dans la Bibliothèque.
 - **Jeux WHDLoad en un geste** : une archive `.lha` de la Bibliothèque se lance d'un toucher. Le cœur Amiberry monte
   le jeu, applique ses réglages (base de jeux d'Amiberry) et garde ses sauvegardes. Il faut un vrai Kickstart.
@@ -42,6 +43,10 @@ les réglages, la Bibliothèque et les sauvegardes.
 - **Carte graphique RTG** (Picasso96, uaegfx) : écrans haute résolution d'AGS et du Workbench.
 - **Configurations enregistrées** sous un nom, **export et import .uae** (WinUAE, Amiberry, version web ; les disques
   sont retrouvés par leur nom dans la Bibliothèque).
+- **Changer d'appareil** : *Tout exporter…* range dans un seul `.zip` les réglages, les touches de la manette, les
+  configurations, les Kickstart, les sauvegardes d'état, celles des jeux (WHDLoad, SHARED:) et les captures ;
+  *Importer…* sur l'autre appareil. Les jeux et disques n'y sont pas (ils sont lus sur place) : ajoutés à la
+  Bibliothèque de l'autre appareil, ils sont retrouvés par leur nom. Le fichier contient vos Kickstart : gardez-le pour vous.
 
 ### Commandes
 - **Écran tactile en souris** : glisser déplace le pointeur, toucher fait un clic gauche, toucher à deux doigts un
@@ -81,7 +86,8 @@ les réglages, la Bibliothèque et les sauvegardes.
   partager un rapport (pile d'appels du cœur et fin du journal).
 
 ### Écran d'accueil
-- Cartes : préréglages, Bibliothèque, Kickstart, Disques, Machine, Commandes, Son et MIDI, Configurations ; résumé de
+- Cartes : préréglages, Bibliothèque, Kickstart, Disques, Machine, Commandes, Son et MIDI, Configurations, Changer
+  d'appareil ; résumé de
   la machine en haut, bouton « Allumer » toujours visible, aide (?) et aide au premier lancement.
 - **Icône adaptative**, monochrome sur Android 13 et plus (icônes à thème).
 

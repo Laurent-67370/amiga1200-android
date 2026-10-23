@@ -19,7 +19,7 @@ class Settings(ctx: Context) {
     private fun put(k: String, v: String?) { p.edit().putString(k, v).commit() }
     private fun flag(k: String, v: Boolean) { p.edit().putBoolean(k, v).commit() }
 
-    /** A1200 ou A500 */
+    /** A500, A600, A1200, A3000, A4000, CD32 ou CDTV */
     var model: String get() = str("model", "A1200"); set(v) { put("model", v); saveProfile() }
     /** JIT 68040 (A1200 seulement) */
     var jit: Boolean get() = p.getBoolean("jit", true); set(v) { flag("jit", v); saveProfile() }
@@ -35,7 +35,7 @@ class Settings(ctx: Context) {
     var df2Name: String get() = str("df2Name", ""); set(v) = put("df2Name", v)
     var df3: String get() = str("df3", ""); set(v) = put("df3", v)
     var df3Name: String get() = str("df3Name", ""); set(v) = put("df3Name", v)
-    /** CD de la CD32 (image .iso ou .chd, un seul fichier) */
+    /** CD de la CD32 ou du CDTV (image .iso ou .chd, un seul fichier) */
     var cd: String get() = str("cd", ""); set(v) = put("cd", v)
     var cdName: String get() = str("cdName", ""); set(v) = put("cdName", v)
     /** Lecteur DFn: : adresse et nom */
@@ -107,7 +107,7 @@ class Settings(ctx: Context) {
 
     // ---------- réglages retenus par disque de démarrage ----------
     /** Disque qui démarre : la disquette DF0:, sinon le premier disque dur */
-    fun bootKey() = if (model == "CD32") cdName else df0Name.ifEmpty { hds.firstOrNull()?.name ?: "" }
+    fun bootKey() = if (Config.cdConsole(model)) cdName else df0Name.ifEmpty { hds.firstOrNull()?.name ?: "" }
     private fun saveProfile() {
         val k = bootKey()
         if (k.isNotEmpty()) p.edit().putString("profil:$k", "${str("model", "A1200")};${p.getBoolean("jit", true)};${p.getBoolean("rtg", true)}").commit()
@@ -213,8 +213,9 @@ object Config {
         return d
     }
 
-    /** Machines : A1200 et A4000 acceptent le JIT et la carte RTG ; la CD32 démarre sur son CD */
-    fun bigBox(model: String) = model == "A1200" || model == "A4000"
+    /** Machines : A1200, A3000 et A4000 acceptent le JIT et la carte RTG ; la CD32 et le CDTV démarrent sur leur CD */
+    fun bigBox(model: String) = model == "A1200" || model == "A3000" || model == "A4000"
+    fun cdConsole(model: String) = model == "CD32" || model == "CDTV"
 
     fun write(ctx: Context, s: Settings, floppies: List<String?>, hds: List<String>, shared: File?, cd: String?): File {
         val sys = sysDir(ctx)
@@ -224,6 +225,15 @@ object Config {
             // CD32 : la console telle qu'elle est, avec ses propres ROM (512 Ko + extension, ou ROM complète de 1 Mo)
             l += "kickstart_rom_file=${File(sys, "cd32.rom").path}"
             File(sys, "cd32ext.rom").takeIf { it.exists() }?.let { l += "kickstart_ext_rom_file=${it.path}" }
+            if (cd != null) l += "cdimage0=$cd,image"
+            l += listOf("ntsc=${s.ntsc}", "gfx_resolution=hires")
+        } else if (model == "CDTV") {
+            // CDTV : la console telle qu'elle est (68000, ECS, 1 Mo de Chip, sans lecteur de disquettes), son Kickstart
+            // (1.3 de préférence) et son extension
+            val kick = Kickstarts.best(ctx, "CDTV")
+            s.romName = kick?.label ?: ""
+            kick?.let { l += "kickstart_rom_file=${it.file.path}" }
+            Kickstarts.cdtvExt(ctx)?.let { l += "kickstart_ext_rom_file=${it.file.path}" }
             if (cd != null) l += "cdimage0=$cd,image"
             l += listOf("ntsc=${s.ntsc}", "gfx_resolution=hires")
         } else {
