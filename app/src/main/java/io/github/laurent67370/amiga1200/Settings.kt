@@ -152,6 +152,8 @@ class Settings(ctx: Context) {
 object Disks {
     /** Descripteurs gardés ouverts tant que le processus vit : le cœur lit et écrit les disques sur place */
     private val open = mutableListOf<ParcelFileDescriptor>()
+    /** Lien → document d'origine, pour relire un disque sans passer par le lien */
+    val uriOf = HashMap<String, String>()
 
     fun displayName(ctx: Context, uri: Uri): String {
         try {
@@ -180,6 +182,7 @@ object Disks {
         f.delete()
         val target = try { Os.readlink("/proc/self/fd/${pfd.fd}") } catch (_: Exception) { "?" }
         Native.log("$name : ouvert en $mode, ${pfd.statSize} octets, descripteur ${pfd.fd} → $target")
+        uriOf[f.path] = uriText
         return try { Os.symlink("/proc/self/fd/${pfd.fd}", f.path); f.path } catch (e: Exception) { Native.log("$name : lien impossible ($e)"); null }
     }
 
@@ -219,13 +222,20 @@ object Config {
 
     /** Disque dur avec table de partitions (RDB, comme AGS) ; sinon l'image d'une seule partition, qui demande sa
      *  géométrie (32 secteurs, 1 tête, 2 blocs réservés, comme le cœur pour un .hdf lancé seul) */
-    fun hasRdb(path: String): Boolean = try {
-        File(path).inputStream().use { i ->
+    fun hasRdb(ctx: Context, path: String): Boolean {
+        fun scan(i: java.io.InputStream): Boolean {
             val b = ByteArray(16 * 512); var n = 0
             while (n < b.size) { val r = i.read(b, n, b.size - n); if (r <= 0) break; n += r }
-            (0 until n / 512).any { k -> String(b, k * 512, 4, Charsets.ISO_8859_1) == "RDSK" }
+            return (0 until n / 512).any { k -> String(b, k * 512, 4, Charsets.ISO_8859_1) == "RDSK" }
         }
-    } catch (_: Exception) { true }
+        // Lu par son document d'origine (le lien vers le descripteur ne se rouvre pas toujours), sinon par le lien
+        val byUri: Boolean? = try { Disks.uriOf[path]?.let { u -> ctx.contentResolver.openInputStream(Uri.parse(u))?.use { scan(it) } } }
+            catch (e: Exception) { Native.log("$path : lecture du début impossible ($e)"); null }
+        val rdb: Boolean? = byUri ?: try { File(path).inputStream().use { scan(it) } }
+            catch (e: Exception) { Native.log("$path : lecture du début impossible ($e)"); null }
+        Native.log("${File(path).name} : " + when (rdb) { true -> "table de partitions (RDB)"; false -> "partition seule (32 secteurs, 1 tête, 2 blocs réservés)"; null -> "illisible, traité comme un disque RDB" })
+        return rdb ?: true
+    }
 
     /** [whdHdf] : jeu installé sur un .hdf qui démarre WHDLoad tout seul. Machine de WHDLoad, quelle que soit celle de
      *  l'accueil : A1200 (68020) avec son Kickstart 3.x et 8 Mo de Fast pour le Preload, sans JIT ni carte RTG */
@@ -289,7 +299,7 @@ object Config {
             // Disques durs sur le pilote d'UAE (uaehf.device) : démarrent AGS et les Workbench préinstallés.
             // Les disques RDB gardent les noms et priorités de démarrage de leurs partitions.
             hds.forEachIndexed { i, path ->
-                val geo = if (hasRdb(path)) "0,0,0,512" else "32,1,2,512"
+                val geo = if (hasRdb(ctx, path)) "0,0,0,512" else "32,1,2,512"
                 l += "hardfile2=rw,DH$i:$path,$geo,${if (i == 0) 0 else -1},,uae$i"
             }
             // SHARED: : jamais un disque de démarrage
