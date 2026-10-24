@@ -98,8 +98,11 @@ static void core_log(enum retro_log_level level, const char *fmt, ...) {
   log_line(level, buf);
 }
 static retro_environment_t real_env;
+static volatile int emu_turbo;
 static bool env_wrap(unsigned cmd, void *data) {
   if (cmd == RETRO_ENVIRONMENT_GET_LOG_INTERFACE) { ((struct retro_log_callback *)data)->log = core_log; return true; }
+  /* Turbo : le cœur passe en mode turbo (sans lui, avec le processeur « au maximum », chaque image dure une image réelle) */
+  if (cmd == RETRO_ENVIRONMENT_GET_FASTFORWARDING) { *(bool *)data = emu_turbo != 0; return true; }
   return real_env(cmd, data);
 }
 void __real_retro_set_environment(retro_environment_t cb);
@@ -386,7 +389,7 @@ JNIEXPORT void JNICALL JNI(setOption)(JNIEnv *env, jobject self, jstring k, jstr
  * Ce qui touche à l'état du cœur depuis l'interface (sauvegardes d'état) s'exécute dans ce fil, entre deux images. */
 static pthread_t emu_thr;
 static pthread_mutex_t emu_mtx = PTHREAD_MUTEX_INITIALIZER;
-static volatile int emu_state, emu_stop, emu_paused, emu_turbo;
+static volatile int emu_state, emu_stop, emu_paused;
 static char emu_path[1024];
 static volatile unsigned stat_frames;
 static volatile double stat_busy_us;

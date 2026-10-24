@@ -12,13 +12,15 @@ import java.util.zip.ZipInputStream
  *  qui démarre WHDLoad tout seul devient un jeu (▶ Jouer). Les disquettes zippées restent lues telles quelles. */
 object ZipImport {
     class Found(val file: File, val kind: String)
-    class Result(val found: List<Found>, val problem: String?)
+    /** [whdArchive] : l'archive contient le dossier d'un jeu WHDLoad (un .slave), lancé tel quel comme une archive .lha */
+    class Result(val found: List<Found>, val problem: String?, val whdArchive: Boolean = false)
 
     fun dir(ctx: Context) = File(ctx.getExternalFilesDir(null) ?: ctx.filesDir, "Disques").apply { mkdirs() }
 
     /** Analyse et extraction ; [found] vide et [problem] nul : une disquette zippée, à garder telle quelle */
     fun inspect(ctx: Context, uri: Uri, zipName: String): Result {
         val found = mutableListOf<Found>()
+        var slave = false
         try {
             ctx.contentResolver.openInputStream(uri)!!.use { ins ->
                 ZipInputStream(ins.buffered()).use { z ->
@@ -26,6 +28,7 @@ object ZipImport {
                         val e = z.nextEntry ?: break
                         if (e.isDirectory) continue
                         val name = e.name.substringAfterLast('/')
+                        if (name.endsWith(".slave", true)) slave = true
                         val kind = when (name.substringAfterLast('.', "").lowercase()) {
                             "hdf", "hdz" -> Library.HDF
                             "lha", "lzh" -> Library.WHD
@@ -45,7 +48,7 @@ object ZipImport {
         } catch (x: EOFException) { return Result(found, incomplete(zipName)) }
         catch (x: ZipException) { return Result(found, incomplete(zipName) + " (${x.message})") }
         catch (x: Exception) { return Result(found, "$zipName : lecture impossible (${x.message})") }
-        return Result(found, null)
+        return Result(found, null, slave && found.isEmpty())
     }
 
     private fun incomplete(n: String) = "$n est incomplet ou abîmé (téléchargement interrompu ?) : retéléchargez-le."

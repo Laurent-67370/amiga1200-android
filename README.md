@@ -44,6 +44,11 @@ les réglages, la Bibliothèque et les sauvegardes.
 - **Jusqu'à 8 disques durs** (HDF, DH0: à DH7:, AGS compris). Disquettes et disques sont **lus et écrits sur
   place**, sans copie, même pour des disques de plusieurs Go.
 - **Volume SHARED:** pour AGS et les sauvegardes WHDLoad (dossier `Android/data/io.github.laurent67370.amiga1200/files/SHARED`).
+- **Mémoire et processeur** (carte Machine) : Chip 512 Ko à 2 Mo, Slow, Fast jusqu'à 8 Mo, carte 68030 ou 68040 sans
+  JIT, retenus pour le disque de démarrage (les vieux jeux qui veulent 512 Ko, ceux qui affichent « Error code 103 »…).
+- **Jeux WHDLoad dans d'autres archives** : dossier du jeu zippé (.zip contenant le .slave) ou archive .lzx, lancés
+  comme une .lha ; les jeux sur .hdf trouvent vos Kickstart dans `WHDCommon:Kickstarts` (noms et .RTB de WHDLoad).
+- **Turbo** vraiment rapide : le cœur passe en mode turbo (il n'est plus limité à 50 images/s avec le JIT).
 - **Carte graphique RTG** (Picasso96, uaegfx) : écrans haute résolution d'AGS et du Workbench.
 - **Configurations enregistrées** sous un nom, **export et import .uae** (WinUAE, Amiberry, version web ; les disques
   sont retrouvés par leur nom dans la Bibliothèque).

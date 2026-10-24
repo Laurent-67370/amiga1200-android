@@ -123,6 +123,7 @@ class MainActivity : Activity() {
             c.addView(switch("Carte graphique RTG : haute résolution d'AGS et du Workbench", { s.rtg }) { s.rtg = it })
             c.addView(switch("Volume SHARED: (sauvegardes AGS et WHDLoad)", { s.shared }) { s.shared = it })
             c.addView(switch("NTSC 60 Hz (sinon PAL 50 Hz)", { s.ntsc }) { s.ntsc = it })
+            c.addView(row(button("Mémoire et processeur…") { MemoryDialog.show(this, s) { refresh() } }))
         }
 
         // Commandes
@@ -220,7 +221,13 @@ class MainActivity : Activity() {
         val console = cd32 || cdtv
         val big = Config.bigBox(s.model)
         val parts = mutableListOf(if (console) s.model else "Amiga ${s.model.removePrefix("A")}")
-        if (big) parts += if (s.jit) "68040 JIT" else if (s.model == "A1200") "68020" else "68030"
+        if (big) parts += if (s.jit) "68040 JIT" else when (s.accel) { "030" -> "68030"; "040" -> "68040"; else -> if (s.model == "A1200") "68020" else "68030" }
+        if (!console) {
+            val mem = listOfNotNull(
+                when (s.chip) { 1 -> "512 Ko Chip"; 2 -> "1 Mo Chip"; 4 -> "2 Mo Chip"; else -> null },
+                if (s.fast > 0 && !(s.jit && big)) "${s.fast} Mo Fast" else null)
+            if (mem.isNotEmpty()) parts += mem.joinToString(" + ")
+        }
         if (big && s.rtg) parts += "RTG"
         if (cd32) parts += if (cd32Rom()) "ROM CD32" else "ROM CD32 manquante"
         else if (cdtv) parts += if (cdtvReady()) Kickstarts.best(this, "CDTV")!!.label.substringBefore(" (") + " + extension" else "ROM du CDTV manquante"
@@ -285,9 +292,9 @@ class MainActivity : Activity() {
         presets.removeAllViews()
         presets.addView(row(
             preset("AGS / Workbench", "A1200, JIT, RTG", s.model == "A1200" && s.jit && s.rtg) { s.model = "A1200"; s.jit = true; s.rtg = true; s.shared = true },
-            preset("A1200 d'origine", "68020, jeux AGA", s.model == "A1200" && !s.jit && !s.rtg) { s.model = "A1200"; s.jit = false; s.rtg = false }))
+            preset("A1200 d'origine", "68020, jeux AGA", s.model == "A1200" && !s.jit && !s.rtg) { s.model = "A1200"; s.jit = false; s.rtg = false; stockMemory() }))
         presets.addView(row(
-            preset("Amiga 500", "jeux et démos OCS", a500) { s.model = "A500"; s.jit = false; s.rtg = false },
+            preset("Amiga 500", "jeux et démos OCS", a500) { s.model = "A500"; s.jit = false; s.rtg = false; stockMemory() },
             preset("CD32", "jeux sur CD", cd32) { s.model = "CD32" }))
         val rf = Config.resumeFile(this)
         // Un jeu lancé directement se reprend quels que soient les réglages de l'accueil ; la machine de l'accueil,
@@ -447,6 +454,9 @@ class MainActivity : Activity() {
         startActivity(Intent(this, EmuActivity::class.java).putExtra(EmuActivity.EXTRA_HDF_URI, it.uri).putExtra(EmuActivity.EXTRA_HDF_NAME, it.name))
     }
 
+    /** Préréglage « d'origine » : mémoire et processeur du modèle */
+    private fun stockMemory() { s.chip = 0; s.slow = -1; s.fast = 0; s.accel = "none" }
+
     /** « Reprendre où j'en étais » : la machine de l'accueil, ou le jeu lancé directement (WHDLoad, .hdf) */
     private fun resumeGame() {
         val i = Intent(this, EmuActivity::class.java).putExtra(EmuActivity.EXTRA_RESUME, true)
@@ -490,9 +500,14 @@ class MainActivity : Activity() {
                         if (f.kind != Library.HDF) libKind = Library.WHD else libKind = Library.HDF
                     }
                     r.problem?.let { notes += it }
+                    // Dossier d'un jeu WHDLoad zippé : rangé avec les jeux, lancé tel quel (le cœur y trouve le .slave)
+                    if (r.whdArchive) {
+                        Library.remove(this, u.toString()); Library.add(this, u.toString(), n, Library.WHD)
+                        notes += "$n : jeu WHDLoad, rangé dans Jeux (▶ Jouer)"; libKind = Library.WHD
+                    }
                     // Une archive déjà rangée comme disquette est remplacée par ce qu'elle contient
                     if (r.found.isNotEmpty()) Library.remove(this, u.toString())
-                    if (r.found.isEmpty() && r.problem == null) keepAsIs += u to n
+                    if (r.found.isEmpty() && r.problem == null && !r.whdArchive) keepAsIs += u to n
                 }
                 refresh()
                 if (notes.isNotEmpty()) AlertDialog.Builder(this).setTitle("Archives").setMessage(notes.joinToString("\n\n")).setPositiveButton("OK", null).show()
