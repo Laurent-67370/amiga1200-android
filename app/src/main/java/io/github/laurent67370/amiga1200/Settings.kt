@@ -24,6 +24,14 @@ class Settings(ctx: Context) {
     /** JIT 68040 (A1200 seulement) */
     var jit: Boolean get() = p.getBoolean("jit", true); set(v) { flag("jit", v); saveProfile() }
     var ntsc: Boolean get() = p.getBoolean("ntsc", false); set(v) = flag("ntsc", v)
+    /** Mémoire Chip en blocs de 512 Ko (0 : celle du modèle ; 1 = 512 Ko, 2 = 1 Mo, 4 = 2 Mo) */
+    var chip: Int get() = p.getInt("chip", 0); set(v) { p.edit().putInt("chip", v).commit(); saveProfile() }
+    /** Mémoire Slow (« trappe » de l'A500) en blocs de 256 Ko (-1 : celle du modèle ; 0, 2 = 512 Ko, 4 = 1 Mo) */
+    var slow: Int get() = p.getInt("slow", -1); set(v) { p.edit().putInt("slow", v).commit(); saveProfile() }
+    /** Mémoire Fast Zorro II en Mo (0, 2, 4, 8 ; pas avec le JIT, qui a déjà 64 Mo de Zorro III) */
+    var fast: Int get() = p.getInt("fast", 0); set(v) { p.edit().putInt("fast", v).commit(); saveProfile() }
+    /** Carte accélératrice sans JIT (A1200, A3000, A4000) : « none », « 030 » (68030/68882) ou « 040 » */
+    var accel: String get() = str("accel", "none"); set(v) { put("accel", v); saveProfile() }
     /** « aros » (ROM libre fournie) ou « user » (Kickstart installés, choisi selon la machine : voir Kickstarts) */
     var rom: String get() = str("rom", "aros"); set(v) = put("rom", v)
     var romName: String get() = str("romName", ""); set(v) = put("romName", v)
@@ -110,13 +118,17 @@ class Settings(ctx: Context) {
     fun bootKey() = if (Config.cdConsole(model)) cdName else df0Name.ifEmpty { hds.firstOrNull()?.name ?: "" }
     private fun saveProfile() {
         val k = bootKey()
-        if (k.isNotEmpty()) p.edit().putString("profil:$k", "${str("model", "A1200")};${p.getBoolean("jit", true)};${p.getBoolean("rtg", true)}").commit()
+        if (k.isNotEmpty()) p.edit().putString("profil:$k", "${str("model", "A1200")};${p.getBoolean("jit", true)};${p.getBoolean("rtg", true)};" +
+            "${p.getInt("chip", 0)};${p.getInt("slow", -1)};${p.getInt("fast", 0)};${str("accel", "none")}").commit()
     }
     /** Reprend la machine retenue pour le disque de démarrage ; vrai si elle existait */
     fun applyProfile(): Boolean {
         val v = p.getString("profil:${bootKey()}", null)?.split(";") ?: return false
         if (v.size < 3) return false
-        p.edit().putString("model", v[0]).putBoolean("jit", v[1] == "true").putBoolean("rtg", v[2] == "true").commit()
+        // Mémoire et processeur : retenus depuis cette version (les anciens profils reprennent ceux du modèle)
+        p.edit().putString("model", v[0]).putBoolean("jit", v[1] == "true").putBoolean("rtg", v[2] == "true")
+            .putInt("chip", v.getOrNull(3)?.toIntOrNull() ?: 0).putInt("slow", v.getOrNull(4)?.toIntOrNull() ?: -1)
+            .putInt("fast", v.getOrNull(5)?.toIntOrNull() ?: 0).putString("accel", v.getOrNull(6) ?: "none").commit()
         return true
     }
 
@@ -144,7 +156,8 @@ class Settings(ctx: Context) {
 
     // ---------- reprise où l'on en était ----------
     /** Signature de la configuration : la reprise n'est proposée qu'avec la même machine et les mêmes disques */
-    fun signature() = listOf(model, jit, rtg, ntsc, rom, romName, df0, df1, df2, df3, cd, hds.joinToString("|") { it.uri }).joinToString("#")
+    fun signature() = listOf(model, jit, rtg, ntsc, rom, romName, df0, df1, df2, df3, cd, hds.joinToString("|") { it.uri },
+        chip, slow, fast, accel).joinToString("#")
     var resumeSig: String get() = str("resumeSig", ""); set(v) = put("resumeSig", v)
     /** Jeu lancé directement dont l'état est gardé : « whd » ou « hdf », son document et son nom (lignes) ; vide pour
      *  la machine de l'accueil */
@@ -219,6 +232,26 @@ object Config {
         return d
     }
 
+    /** Noms des images de Kickstart pour WHDLoad (paquet skick), d'après la somme CRC32 */
+    private val whdKickNames = mapOf(
+        0xA6CE1636L to "kick33180.A500", 0xC4F0F55FL to "kick34005.A500", 0xC3BDB240L to "kick37175.A500",
+        0xFC24AE0DL to "kick40063.A600", 0x6C9B07D2L to "kick39106.A1200", 0x1483A091L to "kick40068.A1200",
+        0xD6BAE334L to "kick40068.A4000",
+    )
+
+    /** Dossier WHDCommon/Kickstarts : vos Kickstart et les tables de relogement (.RTB) d'Amiberry ; null sans Kickstart */
+    fun whdCommon(ctx: Context): File? {
+        val roms = Kickstarts.list(ctx).filter { whdKickNames.containsKey(it.crc) }
+        if (roms.isEmpty()) return null
+        val root = File(ctx.filesDir, "whdcommon"); val dir = File(root, "Kickstarts").apply { mkdirs() }
+        for (r in roms) { val f = File(dir, whdKickNames.getValue(r.crc)); if (!f.exists() || f.length() != r.file.length()) r.file.copyTo(f, overwrite = true) }
+        WhdBoot.ensure(ctx)
+        File(saveDir(ctx), "WHDBoot/save-data/Kickstarts").listFiles { f -> f.name.endsWith(".RTB", true) }?.forEach { rtb ->
+            val f = File(dir, rtb.name); if (!f.exists()) rtb.copyTo(f)
+        }
+        return root
+    }
+
     /** Machines : A1200, A3000 et A4000 acceptent le JIT et la carte RTG ; la CD32 et le CDTV démarrent sur leur CD */
     fun bigBox(model: String) = model == "A1200" || model == "A3000" || model == "A4000"
     fun cdConsole(model: String) = model == "CD32" || model == "CDTV"
@@ -282,6 +315,19 @@ object Config {
             if (s.floppySound) for (i in 0 until n) l += "floppy${i}sound=1"
             floppies.forEachIndexed { i, f -> if (f != null && i < n) l += "floppy$i=$f" }
             if (whdHdf) l += "fastmem_size=8"
+            else {
+                // Mémoire et processeur choisis (retenus pour le disque de démarrage)
+                if (s.chip > 0) l += "chipmem_size=${s.chip}"
+                if (s.slow >= 0) l += "bogomem_size=${s.slow}"
+                // (AROS demande déjà 2 ou 4 Mo à l'A500 et à l'A600 : on garde la plus grande des deux)
+                val have = l.filter { it.startsWith("fastmem_size=") }.maxOfOrNull { it.substringAfter('=').toIntOrNull() ?: 0 } ?: 0
+                if (s.fast > have && !(s.jit && bigBox(model))) { l.removeAll { it.startsWith("fastmem_size=") }; l += "fastmem_size=${s.fast}" }
+            }
+            val accel = if (!whdHdf && bigBox(model) && !s.jit) s.accel else "none"
+            when (accel) {
+                "030" -> l += listOf("cpu_model=68030", "fpu_model=68882", "cpu_24bit_addressing=false", "cpu_multiplier=8")
+                "040" -> l += listOf("cpu_model=68040", "fpu_model=68040", "cpu_24bit_addressing=false", "cpu_multiplier=8")
+            }
             if (s.jit && bigBox(model) && !whdHdf) {
                 // JIT : 68040 traduit en code ARM64, à pleine vitesse, avec 64 Mo de Fast Zorro III
                 l += listOf(
@@ -297,7 +343,7 @@ object Config {
             // Carte RTG sur le Zorro III : il lui faut un processeur 32 bits (le 68EC020 de l'A1200 n'adresse que 16 Mo)
             if (s.rtg && bigBox(model) && !whdHdf) {
                 l += listOf("gfxcard_type=ZorroIII", "gfxcard_size=32")
-                if (!s.jit && model == "A1200") l += listOf("cpu_model=68020", "cpu_24bit_addressing=false")
+                if (!s.jit && model == "A1200" && accel == "none") l += listOf("cpu_model=68020", "cpu_24bit_addressing=false")
             }
             // Disques durs sur le pilote d'UAE (uaehf.device) : démarrent AGS et les Workbench préinstallés.
             // Les disques RDB gardent les noms et priorités de démarrage de leurs partitions.
@@ -307,6 +353,9 @@ object Config {
             }
             // SHARED: : jamais un disque de démarrage
             if (shared != null) l += "filesystem2=rw,DH12:SHARED:${shared.path},-128"
+            // Jeu WHDLoad sur .hdf : vos Kickstart sous les noms qu'attend WHDLoad, dans WHDCommon:Kickstarts (WHDLoad y
+            // cherche après Devs:Kickstarts), pour les jeux qui démarrent sur une image de Kickstart
+            if (whdHdf) whdCommon(ctx)?.let { l += "filesystem2=ro,DH11:WHDCommon:${it.path},-128" }
             // Sans disque dur, ni ROM de démarrage ni carte d'UAE, comme la version web : la machine d'origine, toute sa mémoire au jeu
             if (hds.isEmpty() && shared == null) l += listOf("boot_rom_uae=disabled", "uaeboard=disabled")
         }

@@ -21,7 +21,7 @@ object Library {
 
     fun kindOf(name: String): String = if (name.lowercase().contains("kickstart")) ROM else when (name.substringAfterLast('.', "").lowercase()) {
         "rom" -> ROM
-        "lha", "lzh" -> WHD
+        "lha", "lzh", "lzx" -> WHD
         "hdf", "hdz", "vhd" -> HDF
         "iso", "chd", "cue", "ccd", "nrg", "mds" -> CD
         else -> FLOPPY

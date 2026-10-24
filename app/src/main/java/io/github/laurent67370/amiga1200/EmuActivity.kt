@@ -167,6 +167,8 @@ class EmuActivity : Activity(), SurfaceHolder.Callback {
             // WHDLoad : fichiers de démarrage d'Amiberry, réglages du jeu tirés de sa base, Kickstart reconnu dans files/sys
             WhdBoot.ensure(this)
             Native.log("WHDLoad : $whdName")
+            // Jeu WHDLoad dans une archive autre que .lha (dossier zippé, .lzx…) : le cœur la lance comme une .lha
+            Native.setOption("amiberry_whdload_archive", if (whdName.substringAfterLast('.').lowercase() in setOf("zip", "7z", "lzx")) "enabled" else "disabled")
             Disks.link(this, uri, Disks.safe(whdName)) ?: run { fail("le jeu $whdName est illisible, choisissez-le à nouveau"); return }
         } ?: hdfUri?.let { uri ->
             Native.log("WHDLoad sur disque dur : $hdfName")
