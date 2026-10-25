@@ -58,6 +58,7 @@ class MainActivity : Activity() {
             }, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f))
             addView(chip("✨ Assistant") { wizard() })
             addView(chip("? Aide") { help() })
+            addView(chip("🌐 Web") { web() })
         })
         summary = TextView(this).apply { textSize = 14f; alpha = 0.85f; setPadding(0, dp(2), 0, dp(10)) }
         col.addView(summary)
@@ -747,6 +748,28 @@ class MainActivity : Activity() {
             .setNeutralButton("Aide détaillée") { _, _ -> help() }.show()
     }
 
+    // ---------- version web ----------
+    /** La version web, à l'origine du projet : même cœur, rien à installer ; les configurations .uae passent de l'une à l'autre */
+    private fun web() {
+        AlertDialog.Builder(this).setTitle("🌐 La version web")
+            .setMessage("""
+                Amiga 1200 est né dans le navigateur : la version web tourne sur le même cœur Amiberry, sans rien installer, sur ordinateur, tablette ou téléphone.
+
+                $WEB_URL
+
+                Passer de l'une à l'autre : exportez une configuration .uae ici (carte Configurations), importez-la dans la version web, et inversement. Vos Kickstart et vos disques restent à ajouter de chaque côté.
+            """.trimIndent())
+            .setPositiveButton("Ouvrir la version web") { _, _ ->
+                try { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(WEB_URL))) } catch (_: Exception) { toast("Aucun navigateur pour ouvrir $WEB_URL") }
+            }
+            .setNeutralButton("Copier le lien") { _, _ ->
+                (getSystemService(CLIPBOARD_SERVICE) as android.content.ClipboardManager)
+                    .setPrimaryClip(android.content.ClipData.newPlainText("Amiga 1200", WEB_URL))
+                toast("Lien copié")
+            }
+            .setNegativeButton("Fermer", null).show()
+    }
+
     // ---------- aide ----------
     private fun help() {
         AlertDialog.Builder(this)
@@ -768,6 +791,8 @@ class MainActivity : Activity() {
                 Bouton Retour du téléphone, ou F12 sur un clavier : menu.
 
                 À l'accueil aussi : Image (filtre net ou écran cathodique, pixels réguliers), Son et MIDI (bruit des lecteurs, synthé MIDI), configurations enregistrées, et « Changer d'appareil » : tout exporter dans un fichier .zip, puis l'importer sur un autre téléphone. Appui long sur un jeu de la Bibliothèque : raccourci sur l'écran d'accueil du téléphone.
+
+                🌐 Web : la version web d'origine, dans le navigateur ($WEB_URL) ; les configurations .uae passent de l'une à l'autre.
             """.trimIndent())
             .setPositiveButton("Compris", null)
             .show()
@@ -994,6 +1019,8 @@ class MainActivity : Activity() {
     }
 
     companion object {
+        /** Version web, à l'origine du projet */
+        const val WEB_URL = "https://laurent-67370.github.io/amiga1200/"
         const val REQ_ROM = 1
         const val REQ_DF0 = 2
         const val REQ_HD = 3
