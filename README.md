@@ -52,6 +52,8 @@ les réglages, la Bibliothèque et les sauvegardes.
 - **Carte graphique RTG** (Picasso96, uaegfx) : écrans haute résolution d'AGS et du Workbench.
 - **Configurations enregistrées** sous un nom, **export et import .uae** (WinUAE, Amiberry, version web ; les disques
   sont retrouvés par leur nom dans la Bibliothèque).
+- **🌐 Web** (en haut de l'accueil) : lien vers la version web d'origine, dans le navigateur, et rappel du passage de
+  l'une à l'autre par les configurations .uae.
 - **Changer d'appareil** : *Tout exporter…* range dans un seul `.zip` les réglages, les touches de la manette, les
   configurations, les Kickstart, les sauvegardes d'état, celles des jeux (WHDLoad, SHARED:) et les captures ;
   *Importer…* sur l'autre appareil. Les jeux et disques n'y sont pas (ils sont lus sur place) : ajoutés à la
