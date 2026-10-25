@@ -233,7 +233,7 @@ object Config {
     }
 
     /** Noms des images de Kickstart pour WHDLoad (paquet skick), d'après la somme CRC32 */
-    private val whdKickNames = mapOf(
+    val whdKickNames = mapOf(
         0xA6CE1636L to "kick33180.A500", 0xC4F0F55FL to "kick34005.A500", 0xC3BDB240L to "kick37175.A500",
         0xFC24AE0DL to "kick40063.A600", 0x6C9B07D2L to "kick39106.A1200", 0x1483A091L to "kick40068.A1200",
         0xD6BAE334L to "kick40068.A4000",

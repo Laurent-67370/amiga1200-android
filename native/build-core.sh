@@ -56,9 +56,11 @@ cd "$OUT"
 FLAGS=(-O3 -fPIC -DFE_AMIBERRY -I"$HERE/compat" -I"$SRC/libretro")
 "$CC" "${FLAGS[@]}" -c "$WEB/wasm/frontend.c" -o frontend.o
 "$CC" "${FLAGS[@]}" -Wall -c "$HERE/jni_bridge.c" -o jni_bridge.o
+# Copie de fichiers sur un disque dur (module commun aux applications Android, Mac et PC)
+"$CC" -O2 -fPIC -Wall -c "$HERE/hdtools.c" -o hdtools.o
 find "$SRC/src" "$SRC/libretro" "$SRC/external" -name '*.o' | sort >objs.txt
 [ "$(wc -l <objs.txt)" -ge 300 ] || { echo "compilation incomplète, voir $OUT/make.log" >&2; exit 1; }
-"$CXX" -shared -fPIC -o "$LIBS/libamiga.so" frontend.o jni_bridge.o @objs.txt \
+"$CXX" -shared -fPIC -o "$LIBS/libamiga.so" frontend.o jni_bridge.o hdtools.o @objs.txt \
   -Wl,--no-undefined -Wl,--gc-sections -Wl,--wrap=retro_set_environment -Wl,--wrap=fopen -Wl,-z,max-page-size=16384 \
   -landroid -laaudio -llog -lz -ldl -lm -static-libstdc++
 # Symboles gardés (pas les informations de débogage) : les rapports de plantage d'Android nomment les fonctions du cœur

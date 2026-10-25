@@ -686,3 +686,41 @@ JNIEXPORT jdouble JNICALL JNI(fps)(JNIEnv *env, jobject self) { (void)env; (void
 JNIEXPORT jint JNICALL JNI(videoW)(JNIEnv *env, jobject self) { (void)env; (void)self; return (jint)fe_video_w(); }
 JNIEXPORT jint JNICALL JNI(videoH)(JNIEnv *env, jobject self) { (void)env; (void)self; return (jint)fe_video_h(); }
 JNIEXPORT jint JNICALL JNI(led)(JNIEnv *env, jobject self, jint i) { (void)env; (void)self; return fe_led(i); }
+
+/* ---------- copie de fichiers sur un disque dur (native/hdtools.c) ---------- */
+#include "hdtools.h"
+
+/* Partitions : une ligne par partition (voir hdtools.h) ; « !motif » si le disque est illisible */
+JNIEXPORT jstring JNICALL JNI(hdPartitions)(JNIEnv *env, jobject self, jstring path) {
+  (void)self;
+  char *p = jstr(env, path), out[16384], *r = malloc(sizeof out + 1);
+  int n = hdt_partitions(p, out, sizeof out);
+  snprintf(r, sizeof out + 1, "%s%s", n < 0 ? "!" : "", out);
+  jstring s = (*env)->NewStringUTF(env, r);
+  free(p); free(r);
+  return s;
+}
+
+static char **jstrs(JNIEnv *env, jobjectArray a, int n) {
+  char **r = calloc((size_t)n + 1, sizeof *r);
+  for (int i = 0; i < n; i++) {
+    jstring s = (jstring)(*env)->GetObjectArrayElement(env, a, i);
+    r[i] = jstr(env, s);
+    (*env)->DeleteLocalRef(env, s);
+  }
+  return r;
+}
+
+/* Copie (dst null : dans dest, décompressé si unpack) ; renvoie le compte rendu */
+JNIEXPORT jstring JNICALL JNI(hdCopy)(JNIEnv *env, jobject self, jstring path, jint part, jstring dest, jobjectArray src,
+                                     jobjectArray dst, jboolean unpack) {
+  (void)self;
+  int n = (*env)->GetArrayLength(env, src);
+  char *p = jstr(env, path), *d = jstr(env, dest), **s = jstrs(env, src, n), **t = dst ? jstrs(env, dst, n) : NULL;
+  char *rep = malloc(65536);
+  hdt_copy(p, part, d ? d : "", (const char *const *)s, (const char *const *)t, n, unpack ? 1 : 0, rep, 65536);
+  jstring r = (*env)->NewStringUTF(env, rep);
+  for (int i = 0; i < n; i++) { free(s[i]); if (t) free(t[i]); }
+  free(s); free(t); free(p); free(d); free(rep);
+  return r;
+}
