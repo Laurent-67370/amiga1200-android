@@ -54,6 +54,10 @@ les réglages, la Bibliothèque et les sauvegardes.
   `Android/data/io.github.laurent67370.amiga1200/files/Disques` et rangé selon ce qu'il est ; une archive incomplète
   est signalée ; les disquettes zippées restent lues telles quelles. Un petit **.hdf qui démarre WHDLoad tout seul**
   (jeu installé sur disque dur) devient un jeu : ▶ Jouer le démarre sur un A1200 avec Kickstart 3.x et 8 Mo de Fast.
+- **Scanner un dossier** (Bibliothèque) : un dossier choisi (Amiga Forever, clé USB…) est parcouru avec ses
+  sous-dossiers ; Kickstart (reconnus par empreinte, ROM chiffrées d'Amiga Forever déchiffrées avec le `rom.key` du
+  dossier), jeux WHDLoad, disquettes, disques durs, CD, archives `.zip` et configurations `.uae` sont reconnus par leur
+  contenu. Un bilan dit ce qui est déjà là et quels Kickstart manquent ; les fichiers restent lus sur place.
 - **Bibliothèque** : jeux WHDLoad, disquettes, disques durs et CD déjà choisis, retrouvés d'un toucher, avec l'image
   du jeu. Appui long : raccourci sur l'écran d'accueil d'Android, ou retrait.
 - **Quatre lecteurs de disquettes** (DF0: à DF3:, ADF, DMS, IPF…), disquettes changées en cours de partie, et

@@ -76,7 +76,7 @@ class MainActivity : Activity() {
             c.addView(libTabs)
             libList = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(0, dp(6), 0, 0) }
             c.addView(libList)
-            c.addView(row(button("Ajouter des fichiers…") { pick(REQ_LIB, multiple = true) }))
+            c.addView(row(button("Ajouter des fichiers…") { pick(REQ_LIB, multiple = true) }, button("Scanner un dossier…") { scanFolder() }))
             c.addView(note("Jeux WHDLoad (.lha) lancés d'un toucher, disquettes et disques durs retrouvés sans les rechercher. Appui long : raccourci sur l'écran d'accueil d'Android, ou retrait (le fichier n'est pas effacé)."))
         }
 
@@ -87,7 +87,7 @@ class MainActivity : Activity() {
             c.addView(romList)
             c.addView(row(button("Ajouter un Kickstart…") { pick(REQ_ROM) },
                 button("AROS / mes Kickstart") { s.rom = if (s.rom == "aros") "user" else "aros"; refresh() }))
-            c.addView(note("Installez-en plusieurs (1.3 pour l'Amiga 500, 3.1 pour l'A1200…) : chacun sert à la machine qui lui convient, reconnu à son contenu."))
+            c.addView(note("Installez-en plusieurs (1.3 pour l'Amiga 500, 3.1 pour l'A1200…) : chacun sert à la machine qui lui convient, reconnu à son contenu. « Scanner un dossier… » (Bibliothèque) les retrouve tous d'un coup, ceux d'Amiga Forever compris."))
             c.addView(label("ROM de la CD32"))
             cd32Text = TextView(this).also { c.addView(it) }
             c.addView(row(button("ROM CD32…") { pick(REQ_CD32) }, button("Extension…") { pick(REQ_CD32EXT) }))
@@ -776,6 +776,7 @@ class MainActivity : Activity() {
             .setTitle("Bien démarrer")
             .setMessage("""
                 1. Kickstart : ajoutez vos fichiers ROM, plusieurs si vous voulez (3.1 pour l'A1200, 1.3 pour l'Amiga 500) : chacun sert à la machine qui lui convient. Sans eux, la ROM libre AROS démarre, mais WHDLoad, AGS et la plupart des jeux demandent un vrai Kickstart.
+                Le plus simple : Bibliothèque → « Scanner un dossier… » (celui d'Amiga Forever, une clé USB, votre dossier Amiga) : Kickstart, jeux WHDLoad, disquettes, disques durs, CD et configurations .uae sont reconnus d'un coup ; un bilan montre ce qui est déjà là et les Kickstart qui manquent.
                 2. Jeux et disques : ajoutez vos jeux WHDLoad (.lha), disquettes, disques durs (.hdf) et CD à la Bibliothèque. Ils sont lus sur place, sans copie, même s'ils font plusieurs Go. Un jeu WHDLoad se lance d'un toucher (▶ Jouer). Pour AGS, ajoutez tous ses .hdf d'un coup dans Disques.
                 3. Préréglage : « AGS / Workbench » pour AGS et le Workbench, « Amiga 500 » pour les vieux jeux, « CD32 » pour la console. Carte Machine : A600, A3000, A4000 et CDTV aussi (le CDTV demande un Kickstart 1.3 et son extension).
                 4. Allumez.
@@ -799,6 +800,12 @@ class MainActivity : Activity() {
     }
 
     // ---------- fichiers ----------
+    /** Scanner un dossier : choisi avec le sélecteur de dossier d'Android, gardé lisible (fichiers lus sur place) */
+    private fun scanFolder() {
+        try { startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT_TREE).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION), REQ_SCAN) }
+        catch (_: Exception) { toast("Choix de dossier indisponible sur cet appareil : utilisez « Ajouter des fichiers… »") }
+    }
+
     private fun pick(req: Int, multiple: Boolean = false) {
         val i = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
             addCategory(Intent.CATEGORY_OPENABLE); type = "*/*"
@@ -818,6 +825,12 @@ class MainActivity : Activity() {
 
     private fun handleResult(req: Int, res: Int, data: Intent?) {
         if (res != RESULT_OK || data == null) return
+        if (req == REQ_SCAN) {
+            val tree = data.data ?: return
+            try { contentResolver.takePersistableUriPermission(tree, Intent.FLAG_GRANT_READ_URI_PERMISSION) } catch (_: Exception) {}
+            ScanDialog(this, s, again = { scanFolder() }, done = { refresh() }).start(tree)
+            return
+        }
         if (req == REQ_ROM && data.clipData != null) {
             // Plusieurs Kickstart choisis d'un coup (assistant)
             val c = data.clipData!!
@@ -1033,6 +1046,7 @@ class MainActivity : Activity() {
         const val REQ_BLANK = 10
         const val REQ_BACKUP_OUT = 11
         const val REQ_BACKUP_IN = 12
+        const val REQ_SCAN = 13
         const val EXTRA_RESTART = "rallumer"
         const val ACTION_PLAY = "io.github.laurent67370.amiga1200.JOUER"
         const val EXTRA_PLAY_URI = "lien"
