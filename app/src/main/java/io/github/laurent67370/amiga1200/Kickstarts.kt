@@ -135,6 +135,9 @@ object Kickstarts {
         return add(ctx, bytes) to null
     }
 
+    /** ROM déjà lue (et déchiffrée) par le scan d'un dossier */
+    fun installBytes(ctx: Context, bytes: ByteArray): Rom? = if (bytes.size in setOf(262144, 524288, 1048576)) add(ctx, bytes) else null
+
     fun remove(rom: Rom) { rom.file.delete() }
 
     /** ROM faites pour cette machine, par ordre de préférence (l'A3000 et l'A4000 se prêtent leurs ROM ; le CDTV
