@@ -58,4 +58,9 @@ object Native {
     /** Octets envoyés par l'Amiga depuis le dernier appel */
     external fun midiRead(dst: ByteArray): Int
     external fun midiWrite(src: ByteArray, offset: Int, length: Int)
+
+    /** Copie de fichiers sur un disque dur (native/hdtools.c) : partitions, une par ligne (« !motif » si illisible) */
+    external fun hdPartitions(path: String): String
+    /** dst null : dans dest, décompressé si unpack ; sinon chemins exacts. Renvoie le compte rendu */
+    external fun hdCopy(path: String, part: Int, dest: String, src: Array<String>, dst: Array<String>?, unpack: Boolean): String
 }

@@ -285,6 +285,7 @@ class MainActivity : Activity() {
                 orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
                 addView(TextView(this@MainActivity).apply { text = "DH$i:  ${h.name}"; if (i == 0) setTypeface(typeface, Typeface.BOLD) },
                     LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f))
+                addView(chip("Fichiers…") { hdFiles(h.uri, h.name) })
                 if (i > 0) addView(chip("↑") { s.hds = hds.toMutableList().apply { add(i - 1, removeAt(i)) }; refresh() })
                 addView(chip("✕") { s.hds = hds.filterIndexed { j, _ -> j != i }; refresh() })
             })
@@ -362,7 +363,10 @@ class MainActivity : Activity() {
                         if (Kickstarts.cdtvExt(this@MainActivity) != null) addView(chip("▶ CDTV") { playCd(it, "CDTV") })
                         addView(chip("▶ CD32") { playCd(it) })
                     }
-                    else -> addView(chip(if (s.hds.any { h -> h.uri == it.uri }) "✓ branché" else "+ Brancher") { useHdf(it) })
+                    else -> {
+                        addView(chip(if (s.hds.any { h -> h.uri == it.uri }) "✓ branché" else "+ Brancher") { useHdf(it) })
+                        addView(chip("Fichiers…") { hdFiles(it.uri, it.name) })
+                    }
                 }
                 addView(chip("✕") { removeItem(it) })
                 setOnLongClickListener { _ -> libItemMenu(it); true }
@@ -778,6 +782,7 @@ class MainActivity : Activity() {
                 1. Kickstart : ajoutez vos fichiers ROM, plusieurs si vous voulez (3.1 pour l'A1200, 1.3 pour l'Amiga 500) : chacun sert à la machine qui lui convient. Sans eux, la ROM libre AROS démarre, mais WHDLoad, AGS et la plupart des jeux demandent un vrai Kickstart.
                 Le plus simple : Bibliothèque → « Scanner un dossier… » (celui d'Amiga Forever, une clé USB, votre dossier Amiga) : Kickstart, jeux WHDLoad, disquettes, disques durs, CD et configurations .uae sont reconnus d'un coup ; un bilan montre ce qui est déjà là et les Kickstart qui manquent.
                 2. Jeux et disques : ajoutez vos jeux WHDLoad (.lha), disquettes, disques durs (.hdf) et CD à la Bibliothèque. Ils sont lus sur place, sans copie, même s'ils font plusieurs Go. Un jeu WHDLoad se lance d'un toucher (▶ Jouer). Pour AGS, ajoutez tous ses .hdf d'un coup dans Disques.
+                Copier sur un disque dur : « Fichiers… » à côté d'un disque dur (Disques ou Bibliothèque), Amiga éteint. Un jeu WHDLoad (.lha, .zip) arrive dans son dossier avec son icône, une disquette .adf est ouverte dans un dossier à son nom ; un dossier entier aussi. « Préparer le disque pour WHDLoad » y met WHDLoad et vos Kickstart. Un compte rendu dit ce qui a été copié et ignoré ; si la copie échoue, le disque n'est pas modifié.
                 3. Préréglage : « AGS / Workbench » pour AGS et le Workbench, « Amiga 500 » pour les vieux jeux, « CD32 » pour la console. Carte Machine : A600, A3000, A4000 et CDTV aussi (le CDTV demande un Kickstart 1.3 et son extension).
                 4. Allumez.
 
@@ -806,6 +811,15 @@ class MainActivity : Activity() {
         catch (_: Exception) { toast("Choix de dossier indisponible sur cet appareil : utilisez « Ajouter des fichiers… »") }
     }
 
+    /** Ajouter des fichiers sur un disque dur (HdFiles) : fenêtre, puis sélecteur de fichiers ou de dossier */
+    private var hd: HdFiles? = null
+    private fun hdFiles(uri: String, name: String) {
+        hd = HdFiles(this, uri, name, pickFiles = { pick(REQ_HD_FILES, multiple = true) }, pickFolder = {
+            try { startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT_TREE).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION), REQ_HD_DIR) }
+            catch (_: Exception) { toast("Choix de dossier indisponible sur cet appareil : choisissez les fichiers") ; hd?.show() }
+        }).also { it.show() }
+    }
+
     private fun pick(req: Int, multiple: Boolean = false) {
         val i = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
             addCategory(Intent.CATEGORY_OPENABLE); type = "*/*"
@@ -824,6 +838,13 @@ class MainActivity : Activity() {
     }
 
     private fun handleResult(req: Int, res: Int, data: Intent?) {
+        if (req == REQ_HD_FILES || req == REQ_HD_DIR) {
+            val h = hd ?: return
+            if (res != RESULT_OK || data == null) { h.show(); return }
+            if (req == REQ_HD_DIR) data.data?.let { h.copyTree(it) } ?: h.show()
+            else h.copyUris(data.clipData?.let { c -> (0 until c.itemCount).map { c.getItemAt(it).uri } } ?: listOfNotNull(data.data))
+            return
+        }
         if (res != RESULT_OK || data == null) return
         if (req == REQ_SCAN) {
             val tree = data.data ?: return
@@ -1047,6 +1068,8 @@ class MainActivity : Activity() {
         const val REQ_BACKUP_OUT = 11
         const val REQ_BACKUP_IN = 12
         const val REQ_SCAN = 13
+        const val REQ_HD_FILES = 14
+        const val REQ_HD_DIR = 15
         const val EXTRA_RESTART = "rallumer"
         const val ACTION_PLAY = "io.github.laurent67370.amiga1200.JOUER"
         const val EXTRA_PLAY_URI = "lien"
