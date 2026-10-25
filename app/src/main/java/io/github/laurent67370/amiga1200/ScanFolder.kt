@@ -63,7 +63,8 @@ object ScanFolder {
             for ((id, n) in sub) dir(id, "$path$n/", depth + 1)
         }
         dir(DocumentsContract.getTreeDocumentId(tree), "", 0)
-        return out
+        // Les fichiers les moins enfouis d'abord : l'original passe avant ses copies rangées plus loin
+        return out.sortedWith(compareBy<Item>({ it.path.count { c -> c == '/' } }, { it.path }))
     }
 
     private fun read(ctx: Context, u: Uri): ByteArray? = try { ctx.contentResolver.openInputStream(u)!!.use { it.readBytes() } } catch (_: Exception) { null }
@@ -213,8 +214,10 @@ object ScanFolder {
             val k = it.kind ?: continue
             if (k in setOf(Library.FLOPPY, Library.WHD, Library.WHDHDF, Library.HDF, Library.CD, ZIP) && it.why.isEmpty()) {
                 val id = norm(if (k == ZIP) Library.FLOPPY else k) + "|" + n
-                if (id in lib || (k == ZIP && ("${Library.HDF}|$n" in lib || "${Library.WHD}|$n" in lib))) it.why = "déjà dans la Bibliothèque"
-                else if (!seen.add(id)) it.why = "en double dans le dossier"
+                // Empreinte des disquettes et des jeux (petits fichiers) : même contenu sous un autre nom
+                val c = if ((k == Library.FLOPPY || k == Library.WHD) && it.size in 1L..(16L shl 20)) read(ctx, it.uri)?.let { b -> "crc|" + CRC32().apply { update(b) }.value } ?: "" else ""
+                if (id in lib || (k == ZIP && ("${Library.HDF}|$n" in lib || "${Library.WHD}|$n" in lib))) { it.why = "déjà dans la Bibliothèque"; if (c.isNotEmpty()) seen.add(c) }
+                else if (!seen.add(id) || (c.isNotEmpty() && !seen.add(c))) it.why = "en double dans le dossier"
             }
             if (it.why.isNotEmpty()) it.on = false
         }
