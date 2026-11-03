@@ -33,8 +33,17 @@ android {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
-    packaging { jniLibs { useLegacyPackaging = false } }
+    packaging {
+        jniLibs { useLegacyPackaging = false }
+        // smbj (partages SMB des NAS) et Bouncy Castle : fichiers de description en double
+        resources { excludes += setOf("META-INF/versions/9/OSGI-INF/MANIFEST.MF", "META-INF/DEPENDENCIES", "META-INF/INDEX.LIST") }
+    }
     buildFeatures { buildConfig = true }
 }
 
 kotlin { compilerOptions { jvmTarget.set(JvmTarget.JVM_17) } }
+
+dependencies {
+    // Client SMB 2/3 : disques durs d'un NAS lus et écrits sur place (Smb.kt)
+    implementation("com.hierynomus:smbj:0.14.0")
+}

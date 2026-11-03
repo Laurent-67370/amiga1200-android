@@ -28,7 +28,8 @@ class HdFiles(private val a: Activity, private val uri: String, private val name
 
     /** Le disque ouvert en écriture, sous un lien qui mène à son descripteur (fopen détourné le suit, voir jni_bridge.c) */
     private fun <T> withDisk(f: (String?) -> T): T {
-        val pfd = try { a.contentResolver.openFileDescriptor(Uri.parse(uri), "rw") } catch (e: Exception) { Native.log("$name : écriture refusée ($e)"); null }
+        val pfd = (if (SmbLoc.isSmb(uri)) Smb.open(a, uri, true)
+            else try { a.contentResolver.openFileDescriptor(Uri.parse(uri), "rw") } catch (e: Exception) { Native.log("$name : écriture refusée ($e)"); null })
             ?: return f(null)
         val link = File(File(a.cacheDir, "hd").apply { mkdirs() }, Disks.safe(name))
         try {
