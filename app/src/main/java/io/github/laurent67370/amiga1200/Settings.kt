@@ -187,11 +187,16 @@ object Disks {
      *  symbolique porte son vrai nom (le cœur reconnaît les formats à l'extension) et mène à son descripteur. */
     fun link(ctx: Context, uriText: String, name: String): String? {
         if (uriText.isEmpty()) return null
-        val uri = Uri.parse(uriText)
         var mode = "rw"
-        val pfd = try { ctx.contentResolver.openFileDescriptor(uri, "rw") } catch (e: Exception) { Native.log("$name : écriture refusée ($e)"); null }
-            ?: try { mode = "r"; ctx.contentResolver.openFileDescriptor(uri, "r") } catch (e: Exception) { Native.log("$name : lecture refusée ($e)"); null }
-            ?: return null
+        val pfd = if (SmbLoc.isSmb(uriText)) {
+            // Fichier d'un NAS (partage SMB) : lu et écrit par le réseau, sans copie
+            Smb.open(ctx, uriText, true) ?: run { mode = "r"; Smb.open(ctx, uriText, false) } ?: return null
+        } else {
+            val uri = Uri.parse(uriText)
+            try { ctx.contentResolver.openFileDescriptor(uri, "rw") } catch (e: Exception) { Native.log("$name : écriture refusée ($e)"); null }
+                ?: try { mode = "r"; ctx.contentResolver.openFileDescriptor(uri, "r") } catch (e: Exception) { Native.log("$name : lecture refusée ($e)"); null }
+                ?: return null
+        }
         open += pfd
         val dir = File(ctx.filesDir, "media").apply { mkdirs() }
         val f = File(dir, safe(name))
@@ -265,7 +270,12 @@ object Config {
             return (0 until n / 512).any { k -> String(b, k * 512, 4, Charsets.ISO_8859_1) == "RDSK" }
         }
         // Lu par son document d'origine (le lien vers le descripteur ne se rouvre pas toujours), sinon par le lien
-        val byUri: Boolean? = try { Disks.uriOf[path]?.let { u -> ctx.contentResolver.openInputStream(Uri.parse(u))?.use { scan(it) } } }
+        val byUri: Boolean? = try {
+            Disks.uriOf[path]?.let { u ->
+                if (SmbLoc.isSmb(u)) Smb.head(ctx, u, 16 * 512)?.let { scan(it.inputStream()) }
+                else ctx.contentResolver.openInputStream(Uri.parse(u))?.use { scan(it) }
+            }
+        }
             catch (e: Exception) { Native.log("$path : lecture du début impossible ($e)"); null }
         val rdb: Boolean? = byUri ?: try { File(path).inputStream().use { scan(it) } }
             catch (e: Exception) { Native.log("$path : lecture du début impossible ($e)"); null }

@@ -107,7 +107,7 @@ class MainActivity : Activity() {
             c.addView(label("Disques durs (lus sur place, sans copie)"))
             hdList = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
             c.addView(hdList)
-            c.addView(row(button("Ajouter des disques…") { pick(REQ_HD, multiple = true) }))
+            c.addView(row(button("Ajouter des disques…") { pick(REQ_HD, multiple = true) }, button("Serveur / NAS…") { NasDialog(this, s) { refresh() }.show() }))
             c.addView(note("AGS : sélectionnez d'un coup tous ses fichiers .hdf (Workbench.hdf passe en premier, c'est lui qui démarre)."))
         }
 
@@ -782,6 +782,7 @@ class MainActivity : Activity() {
                 1. Kickstart : ajoutez vos fichiers ROM, plusieurs si vous voulez (3.1 pour l'A1200, 1.3 pour l'Amiga 500) : chacun sert à la machine qui lui convient. Sans eux, la ROM libre AROS démarre, mais WHDLoad, AGS et la plupart des jeux demandent un vrai Kickstart.
                 Le plus simple : Bibliothèque → « Scanner un dossier… » (celui d'Amiga Forever, une clé USB, votre dossier Amiga) : Kickstart, jeux WHDLoad, disquettes, disques durs, CD et configurations .uae sont reconnus d'un coup ; un bilan montre ce qui est déjà là et les Kickstart qui manquent.
                 2. Jeux et disques : ajoutez vos jeux WHDLoad (.lha), disquettes, disques durs (.hdf) et CD à la Bibliothèque. Ils sont lus sur place, sans copie, même s'ils font plusieurs Go. Un jeu WHDLoad se lance d'un toucher (▶ Jouer). Pour AGS, ajoutez tous ses .hdf d'un coup dans Disques.
+                Disques d'un NAS : Disques → « Serveur / NAS… » (adresse, partage, compte), puis cochez les .hdf (AGS : tous) et les jeux. Ils sont lus et écrits directement sur le serveur, sans copie : gardez le Wi-Fi actif, et un seul appareil à la fois sur un même disque.
                 Copier sur un disque dur : « Fichiers… » à côté d'un disque dur (Disques ou Bibliothèque), Amiga éteint. Un jeu WHDLoad (.lha, .zip) arrive dans son dossier avec son icône, une disquette .adf est ouverte dans un dossier à son nom ; un dossier entier aussi. « Préparer le disque pour WHDLoad » y met WHDLoad et vos Kickstart. Un compte rendu dit ce qui a été copié et ignoré ; si la copie échoue, le disque n'est pas modifié.
                 3. Préréglage : « AGS / Workbench » pour AGS et le Workbench, « Amiga 500 » pour les vieux jeux, « CD32 » pour la console. Carte Machine : A600, A3000, A4000 et CDTV aussi (le CDTV demande un Kickstart 1.3 et son extension).
                 4. Allumez.

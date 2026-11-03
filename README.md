@@ -55,6 +55,10 @@ les réglages, la Bibliothèque et les sauvegardes.
   `Android/data/io.github.laurent67370.amiga1200/files/Disques` et rangé selon ce qu'il est ; une archive incomplète
   est signalée ; les disquettes zippées restent lues telles quelles. Un petit **.hdf qui démarre WHDLoad tout seul**
   (jeu installé sur disque dur) devient un jeu : ▶ Jouer le démarre sur un A1200 avec Kickstart 3.x et 8 Mo de Fast.
+- **Disques d'un NAS** (Disques → « Serveur / NAS… ») : partage SMB 2/3 (NAS, Windows, Samba), compte et mot de
+  passe gardés chiffrés sur le téléphone (Keystore). Les .hdf cochés sont branchés et lus et écrits **directement sur le
+  serveur, sans copie** (AGS compris) ; jeux, disquettes et CD rejoignent la Bibliothèque, un Kickstart est installé.
+  Lectures par blocs gardés en mémoire, écritures envoyées aussitôt, connexion rouverte d'elle-même après une coupure.
 - **Ajouter sur un disque dur** (« Fichiers… » à côté d'un disque dur, dans Disques ou la Bibliothèque, Amiga éteint) :
   jeux WHDLoad `.lha` et archives `.zip` décompressés, disquettes `.adf` ouvertes (dans un dossier à leur nom, avec
   leur icône), fichiers ou dossier entier copiés tels quels, sur la partition et dans le dossier choisis (OFS et FFS,
