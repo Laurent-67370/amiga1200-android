@@ -56,7 +56,7 @@ class Settings(ctx: Context) {
     var azerty: Boolean get() = p.getBoolean("azerty", false); set(v) = flag("azerty", v)
     var dh0: String get() = str("dh0", ""); set(v) = put("dh0", v)
     var dh0Name: String get() = str("dh0Name", ""); set(v) = put("dh0Name", v)
-    /** Disques durs DH0: à DH7: (l'ancien réglage DH0: seul est repris) */
+    /** Disques durs DH0: à DH15: (l'ancien réglage DH0: seul est repris) */
     var hds: List<Hd>
         get() {
             val j = p.getString("hds", null) ?: return if (dh0.isNotEmpty()) listOf(Hd(dh0, dh0Name)) else emptyList()
@@ -166,6 +166,8 @@ class Settings(ctx: Context) {
 
 /** Fichiers choisis par l'utilisateur (Storage Access Framework). */
 object Disks {
+    /** Disques durs branchés à la fois (DH0: à DH15:) */
+    const val MAX_HDS = 16
     /** Descripteurs gardés ouverts tant que le processus vit : le cœur lit et écrit les disques sur place */
     private val open = mutableListOf<ParcelFileDescriptor>()
     /** Lien → document d'origine, pour relire un disque sans passer par le lien */
@@ -361,8 +363,8 @@ object Config {
                 val geo = if (hasRdb(ctx, path)) "0,0,0,512" else "32,1,2,512"
                 l += "hardfile2=rw,DH$i:$path,$geo,${if (i == 0) 0 else -1},,uae$i"
             }
-            // SHARED: : jamais un disque de démarrage
-            if (shared != null) l += "filesystem2=rw,DH12:SHARED:${shared.path},-128"
+            // SHARED: : jamais un disque de démarrage ; nom d'unité après ceux des disques durs (DH0: à DH15:)
+            if (shared != null) l += "filesystem2=rw,DH${Disks.MAX_HDS}:SHARED:${shared.path},-128"
             // Jeu WHDLoad sur .hdf : vos Kickstart sous les noms qu'attend WHDLoad, dans WHDCommon:Kickstarts (WHDLoad y
             // cherche après Devs:Kickstarts), pour les jeux qui démarrent sur une image de Kickstart
             if (whdHdf) whdCommon(ctx)?.let { l += "filesystem2=ro,DH11:WHDCommon:${it.path},-128" }

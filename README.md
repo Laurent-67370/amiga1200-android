@@ -72,7 +72,7 @@ les réglages, la Bibliothèque et les sauvegardes.
   du jeu. Appui long : raccourci sur l'écran d'accueil d'Android, ou retrait.
 - **Quatre lecteurs de disquettes** (DF0: à DF3:, ADF, DMS, IPF…), disquettes changées en cours de partie, et
   **disquette vierge** formatée pour les jeux qui sauvegardent sur disquette.
-- **Jusqu'à 8 disques durs** (HDF, DH0: à DH7:, AGS compris). Disquettes et disques sont **lus et écrits sur
+- **Jusqu'à 16 disques durs** (HDF, DH0: à DH15:, AGS compris). Disquettes et disques sont **lus et écrits sur
   place**, sans copie, même pour des disques de plusieurs Go.
 - **Volume SHARED:** pour AGS et les sauvegardes WHDLoad (dossier `Android/data/io.github.laurent67370.amiga1200/files/SHARED`).
 - **Mémoire et processeur** (carte Machine) : Chip 512 Ko à 2 Mo, Slow, Fast jusqu'à 8 Mo, carte 68030 ou 68040 sans

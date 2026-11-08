@@ -24,6 +24,11 @@ import javax.crypto.spec.GCMParameterSpec
 object Smb {
     private val shares = HashMap<String, SmbShare>()
 
+    init {
+        // Cache des disques du NAS : au plus un quart de la mémoire de l'application
+        SmbBlockFile.cacheBlocks = (Runtime.getRuntime().maxMemory() / 4 / SmbBlockFile.BLOCK).toInt().coerceIn(256, 1536)
+    }
+
     // ---------- réglages du serveur, mot de passe chiffré par une clé du Keystore d'Android ----------
     private fun prefs(ctx: Context) = ctx.getSharedPreferences("nas", Context.MODE_PRIVATE)
     private const val KEY = "amiga1200-nas"
