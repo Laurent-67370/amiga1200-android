@@ -94,7 +94,7 @@ class NasDialog(private val a: Activity, private val s: Settings, private val do
     }
     private fun size(n: Long) = if (n >= 1L shl 30) "%.1f Go".format(n / 1073741824.0) else if (n >= 1L shl 20) "%.1f Mo".format(n / 1048576.0) else "${n / 1024} Ko"
 
-    /** Disques durs branchés (8 au plus, Workbench.hdf en premier), le reste rangé dans la Bibliothèque */
+    /** Disques durs branchés (Disks.MAX_HDS au plus, Workbench.hdf en premier), le reste rangé dans la Bibliothèque */
     private fun add(picked: Map<String, String>) {
         if (picked.isEmpty()) return
         val notes = mutableListOf<String>()
@@ -106,7 +106,7 @@ class NasDialog(private val a: Activity, private val s: Settings, private val do
                 Library.HDF -> {
                     Library.add(a, uri, name)
                     if (hds.any { it.uri == uri }) continue
-                    if (hds.size >= 8) { notes += "$name : 8 disques durs au plus, rangé dans la Bibliothèque"; continue }
+                    if (hds.size >= Disks.MAX_HDS) { notes += "$name : ${Disks.MAX_HDS} disques durs au plus, rangé dans la Bibliothèque"; continue }
                     hds += Hd(uri, name)
                 }
                 else -> Library.add(a, uri, name)

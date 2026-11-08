@@ -85,9 +85,7 @@ class SmbShare(val server: SmbServer) {
 class SmbBlockFile(private val share: SmbShare, private val path: String, val writable: Boolean) {
     private var file: File = share.open(path, writable)
     val size: Long = file.fileInformation.standardInformation.endOfFile
-    private val cache = object : LinkedHashMap<Long, ByteArray>(64, 0.75f, true) {
-        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Long, ByteArray>?) = size > CACHE_BLOCKS
-    }
+    private val id = ids.incrementAndGet()
 
     /** Opération sur le fichier, rouvert (connexion comprise) en cas d'échec */
     private fun <T> io(op: (File) -> T): T = try { op(file) } catch (e: Exception) {
@@ -97,7 +95,9 @@ class SmbBlockFile(private val share: SmbShare, private val path: String, val wr
         op(file)
     }
 
-    private fun block(n: Long): ByteArray = cache[n] ?: run {
+    private fun cached(n: Long): ByteArray? = synchronized(lru) { lru[Key(id, n)] }
+
+    private fun block(n: Long): ByteArray = cached(n) ?: run {
         val start = n * BLOCK
         val len = minOf(BLOCK.toLong(), size - start).toInt()
         val b = ByteArray(len)
@@ -108,7 +108,7 @@ class SmbBlockFile(private val share: SmbShare, private val path: String, val wr
             got += r
         }
         if (got < len) throw java.io.IOException("lecture incomplète ($got/$len octets à $start)")
-        cache[n] = b
+        synchronized(lru) { lru[Key(id, n)] = b }
         b
     }
 
@@ -137,7 +137,7 @@ class SmbBlockFile(private val share: SmbShare, private val path: String, val wr
             val p = off + done
             val inBlock = (p % BLOCK).toInt()
             val k = minOf(len - done, BLOCK - inBlock)
-            cache[p / BLOCK]?.let { b -> System.arraycopy(src, srcOff + done, b, inBlock, minOf(k, b.size - inBlock)) }
+            cached(p / BLOCK)?.let { b -> System.arraycopy(src, srcOff + done, b, inBlock, minOf(k, b.size - inBlock)) }
             done += k
         }
         return len
@@ -147,11 +147,18 @@ class SmbBlockFile(private val share: SmbShare, private val path: String, val wr
 
     @Synchronized fun close() {
         try { file.close() } catch (_: Exception) {}
-        cache.clear()
+        synchronized(lru) { lru.keys.removeAll { it.file == id } }
     }
+
+    private data class Key(val file: Int, val block: Long)
 
     companion object {
         const val BLOCK = 64 * 1024
-        const val CACHE_BLOCKS = 512   // 32 Mo par disque
+        /** Blocs gardés pour tous les disques ensemble (96 Mo par défaut ; moins sur un téléphone à petite mémoire) */
+        @Volatile var cacheBlocks = 1536
+        private val ids = java.util.concurrent.atomic.AtomicInteger()
+        private val lru = object : LinkedHashMap<Key, ByteArray>(256, 0.75f, true) {
+            override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Key, ByteArray>?) = size > cacheBlocks
+        }
     }
 }

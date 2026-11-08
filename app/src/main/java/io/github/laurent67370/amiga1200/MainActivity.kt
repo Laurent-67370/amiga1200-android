@@ -574,7 +574,7 @@ class MainActivity : Activity() {
     private fun useHdf(it: LibItem) {
         val list = s.hds.toMutableList()
         if (list.any { h -> h.uri == it.uri }) { s.hds = list.filter { h -> h.uri != it.uri }; refresh(); return }
-        if (list.size >= 8) { toast("8 disques durs au plus"); return }
+        if (list.size >= Disks.MAX_HDS) { toast("${Disks.MAX_HDS} disques durs au plus"); return }
         Library.touch(this, it.uri)
         list += Hd(it.uri, it.name)
         list.sortBy { h -> if (h.name.equals("Workbench.hdf", true)) 0 else 1 }
@@ -895,11 +895,11 @@ class MainActivity : Activity() {
             return
         }
         if (req == REQ_HD) {
-            // Un ou plusieurs disques, ajoutés à la suite (8 au plus)
+            // Un ou plusieurs disques, ajoutés à la suite (Disks.MAX_HDS au plus)
             val uris = data.clipData?.let { c -> (0 until c.itemCount).map { c.getItemAt(it).uri } } ?: listOfNotNull(data.data)
             val list = s.hds.toMutableList()
             for (u in uris) {
-                if (list.size >= 8) { toast("8 disques durs au plus"); break }
+                if (list.size >= Disks.MAX_HDS) { toast("${Disks.MAX_HDS} disques durs au plus"); break }
                 keep(u)
                 val n = Disks.displayName(this, u)
                 Library.add(this, u.toString(), n)
