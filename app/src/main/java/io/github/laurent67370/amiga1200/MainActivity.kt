@@ -283,7 +283,7 @@ class MainActivity : Activity() {
         hds.forEachIndexed { i, h ->
             hdList.addView(LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
-                addView(TextView(this@MainActivity).apply { text = "DH$i:  ${h.name}"; if (i == 0) setTypeface(typeface, Typeface.BOLD) },
+                addView(TextView(this@MainActivity).apply { text = "DH$i:  ${h.name}" + nas(h.uri); if (i == 0) setTypeface(typeface, Typeface.BOLD) },
                     LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f))
                 addView(chip("Fichiers…") { hdFiles(h.uri, h.name) })
                 if (i > 0) addView(chip("↑") { s.hds = hds.toMutableList().apply { add(i - 1, removeAt(i)) }; refresh() })
@@ -353,7 +353,7 @@ class MainActivity : Activity() {
                         setImageBitmap(android.graphics.BitmapFactory.decodeFile(f.path))
                     }, LinearLayout.LayoutParams(dp(64), dp(48)).apply { marginEnd = dp(8) })
                 }
-                addView(TextView(this@MainActivity).apply { text = it.name.substringBeforeLast('.'); textSize = 15f }, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f))
+                addView(TextView(this@MainActivity).apply { text = it.name.substringBeforeLast('.') + nas(it.uri); textSize = 15f }, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f))
                 when (it.kind) {
                     Library.WHD -> addView(chip("▶ Jouer") { playWhd(it) })
                     Library.WHDHDF -> addView(chip("▶ Jouer") { playWhdHdf(it) })
@@ -820,6 +820,9 @@ class MainActivity : Activity() {
             catch (_: Exception) { toast("Choix de dossier indisponible sur cet appareil : choisissez les fichiers") ; hd?.show() }
         }).also { it.show() }
     }
+
+    /** Disque lu sur un NAS : signalé à côté de son nom (un disque local peut porter le même) */
+    private fun nas(uri: String) = if (SmbLoc.isSmb(uri)) "  (NAS)" else ""
 
     private fun pick(req: Int, multiple: Boolean = false) {
         val i = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
