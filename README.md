@@ -144,8 +144,11 @@ L'application **68k Trainer** (apprendre l'assembleur 68000 sur Amiga 500 et 120
 bouton **Essayer sur l'Amiga** passe la disquette du programme (amorçable, compressée) à cette application, qui la range
 dans la Bibliothèque (`files/Trainer`, un essai remplace le précédent du même programme), la met dans DF0: et démarre
 l'Amiga 500 ou 1200 demandé, sans JIT ni carte graphique, avec votre Kickstart du modèle s'il est installé (sinon AROS).
-Une émulation en cours est arrêtée. Tout se passe sur le téléphone, sans connexion. Sans cette application, le Trainer
-ouvre la version web de l'émulateur.
+Une émulation en cours est arrêtée. Tout se passe sur le téléphone, sans connexion.
+
+Le Trainer a désormais son propre émulateur intégré (sélecteur Simulateur / Amiga 500 / Amiga 1200 sous l'éditeur) :
+il s'en sert en premier, et ne passe la disquette à cette application que si sa WebView ne peut pas faire tourner
+l'émulateur (Android System WebView trop ancienne). En dernier recours, il ouvre la version web de l'émulateur.
 
 Pour une autre application : action `io.github.laurent67370.amiga1200.TRAINER`, extras `adf_gz` (disquette .adf de
 880 Ko compressée en gzip), `nom` et `modele` (`A500` ou `A1200`) ; voir `Trainer.kt`.
