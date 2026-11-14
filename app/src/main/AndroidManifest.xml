@@ -22,6 +22,11 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+            <!-- 68k Trainer (dépôt amiga1200, dossier trainer-src) : « Essayer sur l'Amiga » envoie ici la disquette du programme -->
+            <intent-filter>
+                <action android:name="io.github.laurent67370.amiga1200.TRAINER" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
         </activity>
         <!-- L'émulation tourne dans son propre processus : le cœur garde un état global, on le rallume en relançant ce
              processus (l'écran des réglages reste ouvert) -->

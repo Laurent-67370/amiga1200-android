@@ -196,6 +196,7 @@ class MainActivity : Activity() {
         // Rallumage demandé une seule fois : quand Android recrée l'accueil (retour d'une extinction, mémoire libérée),
         // il lui rend la même demande, qui ne doit pas rallumer l'Amiga de nouveau
         if (state == null && intent?.action == ACTION_PLAY) { playFromShortcut(intent); intent.action = null }
+        else if (state == null && intent?.action == Trainer.ACTION) { playTrainer(intent); intent.action = null }
         else if (state == null && intent?.getBooleanExtra(EXTRA_RESTART, false) == true) {
             val uri = intent.getStringExtra(EmuActivity.EXTRA_WHD_URI)
             val name = intent.getStringExtra(EmuActivity.EXTRA_WHD_NAME)
@@ -448,6 +449,34 @@ class MainActivity : Activity() {
                     Library.CD -> playCd(item)
                     Library.FLOPPY -> { useFloppy(item); power() }
                 }
+            }
+        })
+    }
+
+    /** Programme envoyé par le 68k Trainer : sa disquette dans DF0:, sur l'Amiga demandé (A500 ou A1200), sans JIT ni
+     *  carte graphique (le programme parle directement aux puces), avec le Kickstart du modèle s'il y en a un, sinon AROS.
+     *  Une émulation en cours est arrêtée : l'Amiga redémarre sur le nouveau programme. */
+    private fun playTrainer(i: Intent) {
+        val d = Trainer.receive(this, i) ?: run { toast("La disquette envoyée par le 68k Trainer est illisible."); return }
+        Library.remove(this, d.uri)
+        Library.add(this, d.uri, d.name, Library.FLOPPY)
+        s.df0 = d.uri; s.df0Name = d.name
+        s.model = d.model; s.jit = false; s.rtg = false
+        val kick = Kickstarts.best(this, d.model)
+        s.rom = if (kick != null) "user" else "aros"
+        libKind = Library.FLOPPY
+        refresh()
+        toast("68k Trainer : ${d.name} dans DF0:, l'${if (d.model == "A500") "Amiga 500" else "Amiga 1200"} démarre" +
+            (if (kick == null) " avec AROS (ajoutez votre Kickstart pour le vrai système)." else "."))
+        val am = getSystemService(android.app.ActivityManager::class.java)
+        am?.runningAppProcesses?.filter { it.processName == "$packageName:emu" }?.forEach { android.os.Process.killProcess(it.pid) }
+        val t0 = System.currentTimeMillis()
+        val view = window.decorView
+        view.post(object : Runnable {
+            override fun run() {
+                val busy = am?.runningAppProcesses?.any { it.processName == "$packageName:emu" } == true
+                if (busy && System.currentTimeMillis() - t0 < 4000) { view.postDelayed(this, 150); return }
+                power()
             }
         })
     }
@@ -999,6 +1028,7 @@ class MainActivity : Activity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         if (intent.action == ACTION_PLAY) { playFromShortcut(intent); return }
+        if (intent.action == Trainer.ACTION) { playTrainer(intent); return }
         if (intent.getBooleanExtra(EXTRA_RESTART, false)) window.decorView.postDelayed({
             val hdf = intent.getStringExtra(EmuActivity.EXTRA_HDF_URI)
             if (hdf != null) relaunchHdf(hdf, intent.getStringExtra(EmuActivity.EXTRA_HDF_NAME))
